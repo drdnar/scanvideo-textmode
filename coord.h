@@ -6,9 +6,6 @@ typedef signed short coord_x;
 /** Type of coordinate row */
 typedef signed short coord_y;
 
-//#define coord_x signed short
-//#define coord_y signed short
-
 /** Simple 2D coordinate */
 typedef struct Coord
 {

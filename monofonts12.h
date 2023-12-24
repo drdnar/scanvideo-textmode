@@ -21,17 +21,14 @@
 #define MONO_FONT_DARK_GRAPHICS_OFFSET 768
 #define MONO_FONT_DARK_GRAPHICS_GLYPH(x) ((x) + MONO_FONT_DARK_GRAPHICS_OFFSET)
 
-//#define MONO_FONT_12_SECTION_ATTRIBUTE __not_in_flash("monofonts12column")
 #define MONO_FONT_12_SECTION_ATTRIBUTE __not_in_flash("monofonts12normal")
 /**
  * Raw glyph bitmap data array.
  */
-//extern const MONO_FONT_12_SECTION_ATTRIBUTE unsigned short mono_font_12_bitmaps_columns[MONO_FONTS_COUNT][MONO_FONT_GLYPH_COUNT][MONO_FONT_WIDTH];
 extern const MONO_FONT_12_SECTION_ATTRIBUTE unsigned char mono_font_12_bitmaps_normal[MONO_FONTS_COUNT][MONO_FONT_GLYPH_COUNT][MONO_FONT_HEIGHT];
 /**
- * 12-pixel-high column-order monospaced font descriptor for text_mode rendering routine
+ * 12-pixel-high monospaced font descriptor for text_mode rendering routine
  */
-//extern const MONO_FONT_12_SECTION_ATTRIBUTE text_mode_font mono_font_12_column_order;
 extern const MONO_FONT_12_SECTION_ATTRIBUTE text_mode_font mono_font_12_normal;
 
 

@@ -16,8 +16,9 @@ set(PICO_NO_FLASH 1)
 
 target_sources(scanvideotest PUBLIC
     main.c
-    monofonts12_normal.c
     text_buffer.c
+    monofonts12_normal.c
+    cp437.c
 )
 
 target_compile_definitions(scanvideotest PRIVATE

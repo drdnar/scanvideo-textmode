@@ -13,9 +13,32 @@
 
 #include "text_buffer.h"
 #include "monofonts12.h"
+#include "cp437.h"
 
 // Implement full 800x480 at 180 MHz instead of 760x480 at 150 MHz.
-#define FULL_RES
+//#define FULL_RES
+// Use CP437 font instead
+#define USE_CP437
+
+#ifdef USE_CP437
+/** Left double-quote */
+#define LDQ "\""
+/** Right double-quote */
+#define RDQ "\""
+/** Apostrophe */
+#define APS "'"
+/** Em dash */
+#define EMD "\304"
+#else
+/** Left double-quote */
+#define LDQ ""LDQ""
+/** Right double-quote */
+#define RDQ ""RDQ""
+/** Apostrophe */
+#define APS ""APS""
+/** Em dash */
+#define EMD ""EMD""
+#endif
 
 /** Reverse horizontal scan direction */
 #define MIRROR_PIN 18
@@ -62,11 +85,20 @@ enum COLORS6BPP
     BRIGHT_WHITE  = 0b111111,
 };
 
+//#ifndef USE_CP437
 #define TEXT_ROWS 40
 #define TEXT_COLS 100
+//#else
+//#define TEXT_ROWS 35
+//#define TEXT_COLS 88
+//#endif
 
 /** Currently active font. */
+#ifndef USE_CP437
 const text_mode_font* current_font = &mono_font_12_normal;
+#else
+const text_mode_font* current_font = &cp437;
+#endif
 
 /** Main text buffer for rendering. */
 text_buffer main_buffer = STATIC_TEXT_BUFFER(TEXT_COLS, TEXT_ROWS, BRIGHT_WHITE, BLACK, ' ', 0);
@@ -107,6 +139,16 @@ const scanvideo_mode_t tft_mode_480x800_60 = {
 };
 
 
+#ifdef FULL_RES
+#define COLS_TO_RENDER (current_buffer->size.x)
+#else
+#ifndef USE_CP437
+#define COLS_TO_RENDER 94
+#else /* USE_CP437 is set */
+#define COLS_TO_RENDER 88
+#endif /* USE_CP437 */
+#endif /* FULL_RES */
+
 /** Rendering routine. */
 __scratch_y("renderloop") void renderloop()
 {
@@ -115,71 +157,74 @@ __scratch_y("renderloop") void renderloop()
         gpio_put(TIMING_MEASURE_PIN, 1);
         uint16_t* write = (uint16_t*)buffer->data;
         *write++ = COMPOSABLE_RAW_RUN;
-#ifdef FULL_RES
-#define COLS_TO_RENDER (current_buffer->size.x)
-#else
-#define COLS_TO_RENDER 95
-#endif
-        uint16_t* length = write++;
-        // Render loop
-        divmod_result_t r = hw_divider_divmod_u32(scanvideo_scanline_number(buffer->scanline_id), current_font->scan_lines);
-        uint32_t char_row = to_remainder_u32(r);
-        uint32_t ignored1, ignored2, ignored3;
-        register uint32_t row asm("r5") = to_quotient_u32(r);
-        register text_color* rwrite asm("r0") = write;
-        register uint32_t rbytes asm("r1") = current_font->bytes_per_glyph;
-        register text_cell* rread asm("r2") = text_buffer_cell(current_buffer, 0, row);
-        register uint8_t* rfont asm("r3") = (uint8_t*)current_font->data + char_row;
-        register uint32_t rcols asm("r4") = COLS_TO_RENDER;
-        register int rjump_delta asm("r8") = sizeof(text_cell) * (8 - current_font->scan_pixels) + 1;
-        register int rwrite_inc asm("r9") = current_font->scan_pixels * 2;
-    asm volatile(
-        // This ends up being a bit over 4-5 cycles per pixel depending on how often it changes
-        // between foreground and background color.  Since Latin scripts are mostly white space,
-        // most time will be spent in the reset bit path, where there are no branches to flush
-        // the (short two-stage) pipeline, so it'll average closer to 4 cycles per pixel.
-        // But some semigraphical glyphs can alternate every pixel, so you still should plan for
-        // the worst-case 5 cycles.
-        "// Cache loop start address\n"
-        "    adr     r6, loop_entry%=\n"
-        "    add     %[loopstart], r6\n"
-        "loop%=:\n"
-        "// Fetch character and colors\n"
-        "    ldrh    %[bitmap], [%[read], #0]\n"
-        //" mov %[bitmap], #77\n"
-        "    // RP2040's CPU cores have the single-cycle multiplier option so shifting isn't any faster\n"
-        "    // and is really only useful if you need to save a register.\n"
-        "    mul     %[bitmap], %[glyphsize], %[bitmap]\n"
-        // 8 or fewer pixels wide (one byte per line)
-        "    ldrb    %[bitmap], [%[bitmap], %[font]]\n"
-
-        // TEMP CODE FOR LEFT-ALIGNED BITMAPS
-        //"    lsl     %[bitmap], %[bitmap], #(16 - 12) // for left-aligned bitmap, 12 is the glyph width\n"
-        
-        "    ldrh    r6, [%[read], #2]\n" // offset of text_cell.foreground
-        "    ldrh    r7, [%[read], #4]\n" // offset of text_cell.background
-        "    add     %[read], %[read], #6\n" // sizeof(text_cell)
-        "// Unrolled loop\n"
-        "    bx      %[loopstart]\n"
-        ".balign 4 // ADR requires 32-bit alignment\n"
-        "loop_entry%=:"
+        /*uint16_t* length = */write++;
+        const text_mode_font* font = current_font;
+        // Assembly code depends on layout of text_cell.
+        assert(sizeof(text_cell) == 6);
+        if (font->bytes_per_scan == 1) {
+            // Render loop
+            divmod_result_t r = hw_divider_divmod_u32(scanvideo_scanline_number(buffer->scanline_id), font->scan_lines);
+            uint32_t char_row = to_remainder_u32(r);
+            uint32_t ignored1, ignored2, ignored3;
+            register uint32_t row asm("r5") = to_quotient_u32(r);
+            register text_color* rwrite asm("r0") = write;
+            register uint32_t rbytes asm("r1") = font->bytes_per_glyph;
+            register text_cell* rread asm("r2") = text_buffer_cell(current_buffer, 0, row);
+            register uint8_t* rfont asm("r3") = (uint8_t*)font->data + char_row;
+            register uint32_t rcols asm("r4") = COLS_TO_RENDER;
+            register int rjump_delta asm("r8") = 6 * (8 - font->scan_pixels) + 1; // +1 for Thumb mode
+            register int rwrite_inc asm("r9") = font->scan_pixels * 2;
+        asm volatile(
+            // This ends up being a bit over 4-5 cycles per pixel depending on how often it changes
+            // between foreground and background color.  Since Latin scripts are mostly white space,
+            // most time will be spent in the reset bit path, where there are no branches to flush
+            // the (short two-stage) pipeline, so it'll average closer to 4 cycles per pixel.
+            // But some semigraphical glyphs can alternate every pixel, so you still should plan for
+            // the worst-case 5 cycles.
+            // TODO: Still possibly some cycles to be saved by copying the loop start stuff to end of
+            // the loop so as to get rid of one jump per character.
+            "// Cache loop start address\n"
+            "    adr     r6, loop_entry%=\n"
+            "    add     %[loopstart], r6\n"
+//            "loop%=:\n"
+            "// Fetch character and colors\n"
+            "    ldrh    %[bitmap], [%[read], #0]\n"
+            "    // RP2040's CPU cores have the single-cycle multiplier option so shifting isn't any faster\n"
+            "    // and is really only useful if you need to save a register.\n"
+            "    mul     %[bitmap], %[glyphsize], %[bitmap]\n"
+            "    ldrb    %[bitmap], [%[bitmap], %[font]]\n"
+            "    ldrh    r6, [%[read], #2]\n" // offset of text_cell.foreground
+            "    ldrh    r7, [%[read], #4]\n" // offset of text_cell.background
+            "    add     %[read], %[read], #6\n" // sizeof(text_cell)
+            "// Unrolled loop\n"
+            "    bx      %[loopstart]\n"
+            ".balign 4 // ADR requires 32-bit alignment\n"
+            "loop_entry%=:"
 #define resetbit(bit) "    lsr     %[bitmap], %[bitmap], #1\n" \
 "    bcs     set" #bit "%=\n" \
 "reset" #bit "%=:\n" \
 "    strh    r7, [%[write], #(" #bit " * 2)]\n"
-        resetbit(7)
-        resetbit(6)
-        resetbit(5)
-        resetbit(4)
-        resetbit(3)
-        resetbit(2)
-        resetbit(1)
-        resetbit(0)
-        "    add     %[write], %[writeinc]\n"
-        "    sub     %[cols], #1\n"
-        "    bne     loop%=\n"
-        "    b       done%=\n"
-        // First iteration here is slightly different because there's no preshifting to be done.
+            resetbit(7)
+            resetbit(6)
+            resetbit(5)
+            resetbit(4)
+            resetbit(3)
+            resetbit(2)
+            resetbit(1)
+            resetbit(0)
+            "    add     %[write], %[writeinc]\n"
+            "    sub     %[cols], #1\n"
+//            "    bne     loop%=\n"
+//            "    b       done%=\n"
+            "    beq     done%=\n"
+            "    ldrh    %[bitmap], [%[read], #0]\n"
+            "    mul     %[bitmap], %[glyphsize], %[bitmap]\n"
+            "    ldrb    %[bitmap], [%[bitmap], %[font]]\n"
+            "    ldrh    r6, [%[read], #2]\n" // offset of text_cell.foreground
+            "    ldrh    r7, [%[read], #4]\n" // offset of text_cell.background
+            "    add     %[read], %[read], #6\n" // sizeof(text_cell)
+            "    bx      %[loopstart]\n"
+            // First iteration here is slightly different because there's no preshifting to be done.
 #define sethighbit(bit) "set" #bit "%=:\n" \
 "    strh    r6, [%[write], #(" #bit " * 2)]\n"
         sethighbit(7)
@@ -187,42 +232,181 @@ __scratch_y("renderloop") void renderloop()
 "    bcc     reset" #bit "%=\n" \
 "set" #bit "%=:\n" \
 "    strh    r6, [%[write], #(" #bit " * 2)]\n"
-        setbit(6)
-        setbit(5)
-        setbit(4)
-        setbit(3)
-        setbit(2)
-        setbit(1)
-        setbit(0)
-        "    add     %[write], %[writeinc]\n"
-        "    sub     %[cols], #1\n"
-        "    bne     loop%=\n"
-        "done%=:"
-      :  [read]     "=r" (ignored1),
-         [write]    "=r" (rwrite),
-         [cols]     "=r" (ignored2),
-         [loopstart]"=r" (rjump_delta),
-         [bitmap]   "=r" (ignored3)
-      : "[write]"        (rwrite),
-         [glyphsize]"r"  (rbytes),
-        "[read]"         (rread),
-         [font]     "r"  (rfont),
-        "[loopstart]""r" (rjump_delta),
-         [writeinc] "r"  (rwrite_inc),
-        "[bitmap]"  "r"  (row),
-        "[cols]"    "r"  (rcols)
-      : "cc", "memory",
-        "r6", "r7"
-    );
+            setbit(6)
+            setbit(5)
+            setbit(4)
+            setbit(3)
+            setbit(2)
+            setbit(1)
+            setbit(0)
+            "    add     %[write], %[writeinc]\n"
+            "    sub     %[cols], #1\n"
+//            "    bne     loop%=\n"
+            "    beq     done%=\n"
+            "    ldrh    %[bitmap], [%[read], #0]\n"
+            "    mul     %[bitmap], %[glyphsize], %[bitmap]\n"
+            "    ldrb    %[bitmap], [%[bitmap], %[font]]\n"
+            "    ldrh    r6, [%[read], #2]\n" // offset of text_cell.foreground
+            "    ldrh    r7, [%[read], #4]\n" // offset of text_cell.background
+            "    add     %[read], %[read], #6\n" // sizeof(text_cell)
+            "    bx      %[loopstart]\n"
+            "done%=:"
+        :  [read]     "=r" (ignored1),
+           [write]    "=r" (write),
+           [cols]     "=r" (ignored2),
+           [loopstart]"=r" (rjump_delta),
+           [bitmap]   "=r" (ignored3)
+        : "[write]"        (rwrite),
+           [glyphsize]"r"  (rbytes),
+          "[read]"         (rread),
+           [font]     "r"  (rfont),
+          "[loopstart]""r" (rjump_delta),
+           [writeinc] "r"  (rwrite_inc),
+          "[bitmap]"  "r"  (row),
+          "[cols]"    "r"  (rcols)
+        : "cc", "memory",
+           "r6", "r7"
+        );
 #undef resetbit
 #undef sethighbit
 #undef setbit
-        write = rwrite;
+        } else if (font->bytes_per_scan == 2) {
+            // Render loop
+            divmod_result_t r = hw_divider_divmod_u32(scanvideo_scanline_number(buffer->scanline_id), font->scan_lines);
+            uint32_t char_row = to_remainder_u32(r);
+            uint32_t ignored1, ignored2, ignored3;
+            register uint32_t row asm("r5") = to_quotient_u32(r);
+            register text_color* rwrite asm("r0") = write;
+            register uint32_t rbytes asm("r1") = font->bytes_per_glyph;
+            register text_cell* rread asm("r2") = text_buffer_cell(current_buffer, 0, row);
+            register uint16_t* rfont asm("r3") = (uint16_t*)font->data + char_row;
+            register uint32_t rcols asm("r4") = COLS_TO_RENDER;
+            register int rjump_delta asm("r8") = 6 * (16 - font->scan_pixels) + 1; // +1 for Thumb mode
+            register int rwrite_inc asm("r9") = font->scan_pixels * 2;
+        asm volatile(
+            // This ends up being a bit over 4-5 cycles per pixel depending on how often it changes
+            // between foreground and background color.  Since Latin scripts are mostly white space,
+            // most time will be spent in the reset bit path, where there are no branches to flush
+            // the (short two-stage) pipeline, so it'll average closer to 4 cycles per pixel.
+            // But some semigraphical glyphs can alternate every pixel, so you still should plan for
+            // the worst-case 5 cycles.
+            "// Cache loop start address\n"
+            "    adr     r6, loop_entry%=\n"
+            "    add     %[loopstart], r6\n"
+//            "loop%=:\n"
+            "// Fetch character and colors\n"
+            "    ldrh    %[bitmap], [%[read], #0]\n"
+            "    // RP2040's CPU cores have the single-cycle multiplier option so shifting isn't any faster\n"
+            "    // and is really only useful if you need to save a register.\n"
+            "    mul     %[bitmap], %[glyphsize], %[bitmap]\n"
+            "    ldrh    %[bitmap], [%[bitmap], %[font]]\n"
+            "    ldrh    r6, [%[read], #2]\n" // offset of text_cell.foreground
+            "    ldrh    r7, [%[read], #4]\n" // offset of text_cell.background
+            "    add     %[read], %[read], #6\n" // sizeof(text_cell)
+            "// Unrolled loop\n"
+            "    bx      %[loopstart]\n"
+            ".balign 4 // ADR requires 32-bit alignment\n"
+            "loop_entry%=:"
+#define resetbit(bit) "    lsr     %[bitmap], %[bitmap], #1\n" \
+"    bcs     set" #bit "%=\n" \
+"reset" #bit "%=:\n" \
+"    strh    r7, [%[write], #(" #bit " * 2)]\n"
+            resetbit(15)
+            resetbit(14)
+            resetbit(13)
+            resetbit(12)
+            resetbit(11)
+            resetbit(10)
+            resetbit(9)
+            resetbit(8)
+            resetbit(7)
+            resetbit(6)
+            resetbit(5)
+            resetbit(4)
+            resetbit(3)
+            resetbit(2)
+            resetbit(1)
+            resetbit(0)
+            "    add     %[write], %[writeinc]\n"
+            "    sub     %[cols], #1\n"
+//            "    bne     loop%=\n"
+//            "    b       done%=\n"
+            "    beq     done%=\n"
+            "    ldrh    %[bitmap], [%[read], #0]\n"
+            "    mul     %[bitmap], %[glyphsize], %[bitmap]\n"
+            "    ldrh    %[bitmap], [%[bitmap], %[font]]\n"
+            "    ldrh    r6, [%[read], #2]\n" // offset of text_cell.foreground
+            "    ldrh    r7, [%[read], #4]\n" // offset of text_cell.background
+            "    add     %[read], %[read], #6\n" // sizeof(text_cell)
+            "    bx      %[loopstart]\n"
+            // First iteration here is slightly different because there's no preshifting to be done.
+#define sethighbit(bit) "set" #bit "%=:\n" \
+"    strh    r6, [%[write], #(" #bit " * 2)]\n"
+        sethighbit(15)
+#define setbit(bit) "    lsr     %[bitmap], %[bitmap], #1\n" \
+"    bcc     reset" #bit "%=\n" \
+"set" #bit "%=:\n" \
+"    strh    r6, [%[write], #(" #bit " * 2)]\n"
+            setbit(14)
+            setbit(13)
+            setbit(12)
+            setbit(11)
+            setbit(10)
+            setbit(9)
+            setbit(8)
+            setbit(7)
+            setbit(6)
+            setbit(5)
+            setbit(4)
+            setbit(3)
+            setbit(2)
+            setbit(1)
+            setbit(0)
+            "    add     %[write], %[writeinc]\n"
+            "    sub     %[cols], #1\n"
+//            "    bne     loop%=\n"
+            "    beq     done%=\n"
+            "    ldrh    %[bitmap], [%[read], #0]\n"
+            "    mul     %[bitmap], %[glyphsize], %[bitmap]\n"
+            "    ldrh    %[bitmap], [%[bitmap], %[font]]\n"
+            "    ldrh    r6, [%[read], #2]\n" // offset of text_cell.foreground
+            "    ldrh    r7, [%[read], #4]\n" // offset of text_cell.background
+            "    add     %[read], %[read], #6\n" // sizeof(text_cell)
+            "    bx      %[loopstart]\n"
+            "done%=:"
+        :  [read]     "=r" (ignored1),
+           [write]    "=r" (write),
+           [cols]     "=r" (ignored2),
+           [loopstart]"=r" (rjump_delta),
+           [bitmap]   "=r" (ignored3)
+        : "[write]"        (write),
+           [glyphsize]"r"  (rbytes),
+          "[read]"         (rread),
+           [font]     "r"  (rfont),
+          "[loopstart]""r" (rjump_delta),
+           [writeinc] "r"  (rwrite_inc),
+          "[bitmap]"  "r"  (row),
+          "[cols]"    "r"  (rcols)
+        : "cc", "memory",
+          "r6", "r7"
+        );
+#undef resetbit
+#undef sethighbit
+#undef setbit
+        } else {
+            assert(0);
+        }
+        uint16_t* length = (uint16_t*)buffer->data + 1;
         length[0] = length[1];
-        length[1] = 8*COLS_TO_RENDER;
+        short count = font->scan_pixels * COLS_TO_RENDER;
+        length[1] = count;
         // Buffer footer
-        *write++ = COMPOSABLE_EOL_SKIP_ALIGN;
-        *write++ = 0;
+        if (count & 1) {
+            *write++ = COMPOSABLE_EOL_ALIGN;
+        } else {
+            *write++ = COMPOSABLE_EOL_SKIP_ALIGN;
+            *write++ = 0;
+        }
         buffer->data_used = (uint32_t*)write - buffer->data;
         buffer->status = SCANLINE_OK;
         gpio_put(TIMING_MEASURE_PIN, 0);
@@ -259,7 +443,6 @@ int main()
     gpio_init_out(VGH_PIN, 0);
     gpio_init_out(DITHERING_PIN, 1);
     gpio_init_out(TIMING_MEASURE_PIN, 0);
-    //gpio_set_outover(15, GPIO_OVERRIDE_INVERT);
     gpio_set_function(PWM_PIN, GPIO_FUNC_PWM);
     unsigned slice = pwm_gpio_to_slice_num(PWM_PIN);
     pwm_set_wrap(slice, 16384);
@@ -271,13 +454,19 @@ int main()
 
     current_buffer->colors.foreground = BLACK;
     current_buffer->colors.background = BRIGHT_WHITE;
+#ifndef USE_CP437
     current_buffer->font = MONO_FONT_BOLD;
+#else
+    main_buffer.font = 0;
+#endif
     text_buffer_put_string(current_buffer,
     //   00        10        20        30        40        50        60        70        80        90
     //  <123456789 123456789 123456789 123456789 123456789 123456789 123456789 123456789 123456789 123456789 >
         "                                            I Have a Dream                                          "
     );
+#ifndef USE_CP437
     main_buffer.font = MONO_FONT_REGULAR;
+#endif
     text_buffer_put_string(current_buffer,
         "I am happy to join with you today in what will go down in history as the greatest demonstration for " //  1
         "freedom in the history of our nation.                                                               " //  2
@@ -290,26 +479,26 @@ int main()
         "years later, the Negro lives on a lonely island of poverty in the midst of a vast ocean of material " //  9
         "prosperity.  One hundred years later, the Negro is still languished in the corners of American      " // 10
         "society and finds himself an exile in his own land.                                                 " // 11
-        "And so we\222ve come here today to dramatize the same cruel condition.  In a sense we\222ve come to our   " // 12
-        "nation\222s capital to cash a cheque.  When the architects of our republic wrote the magnificent words " // 13
+        "And so we"APS"ve come here today to dramatize the same cruel condition.  In a sense we"APS"ve come to our   " // 12
+        "nation"APS"s capital to cash a cheque.  When the architects of our republic wrote the magnificent words " // 13
         "of the Constitution and the Declaration of Independence, they were signing a promissory note to     " // 14
-        "which every American was to fall heir.  This note was a promise that all men\227yes, black men as well " // 15
-        "as white men\227would be guaranteed the inalienable rights of \223Life, Liberty, and the pursuit of       " // 16
-        "Happiness.\224                                                                                         " // 17
+        "which every American was to fall heir.  This note was a promise that all men"EMD"yes, black men as well " // 15
+        "as white men"EMD"would be guaranteed the inalienable rights of "LDQ"Life, Liberty, and the pursuit of       " // 16
+        "Happiness."RDQ"                                                                                         " // 17
         "It is obvious today that America has defaulted on this promissory note insofar as her citizens of   " // 18
         "color are concerned.  Instead of honoring this sacred obligation, America has given the Negro people" // 19
-        "a bad cheque, a cheque which has come back marked \223insufficient funds.\224  But we refuse to believe   " // 20
+        "a bad cheque, a cheque which has come back marked "LDQ"insufficient funds."RDQ"  But we refuse to believe   " // 20
         "that the bank of justice is bankrupt.  We refuse to believe that there are insufficient funds in the" // 21
-        "great vaults of opportunity of this nation.  So we\222ve come to cash this cheque\227a cheque that will   " // 22
+        "great vaults of opportunity of this nation.  So we"APS"ve come to cash this cheque"EMD"a cheque that will   " // 22
         "give us upon demand the riches of freedom and the security of justice.                              " // 23
         "We have also come to this hallowed spot to remind America of the fierce urgency of now.  This is no " // 24
         "time to engage in the luxury of cooling off or to take the tranquilizing drug of gradualism.  Now is" // 25
         "the time to make real the promises of democracy.  Now is the time to rise from the dark and desolate" // 26
         "valley of segregation to the sunlit path of racial justice.  Now is the time to lift our nation from" // 27
         "the quicksands of racial injustice to the solid rock of brotherhood.  Now is the time to make       " // 28
-        "justice a reality for all of God\222s children.                                                        " // 29
+        "justice a reality for all of God"APS"s children.                                                        " // 29
         "It would be fatal for the nation to overlook the urgency of the moment.  This sweltering summer of  " // 30
-        "the Negro\222s legitimate discontent will not pass until there is an invigorating autumn of freedom and" // 31
+        "the Negro"APS"s legitimate discontent will not pass until there is an invigorating autumn of freedom and" // 31
         "equality.  1963 is not an end, but a beginning.  Those who hope that the Negro needed to blow off   " // 32
         "steam and will now be content will have a rude awakening if the nation returns to business as usual." // 33
         "There will be neither rest nor tranquillity in America until the Negro is granted his citizenship   " // 34
