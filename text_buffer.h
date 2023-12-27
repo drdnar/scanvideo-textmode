@@ -7,10 +7,17 @@
 #include <stdlib.h>
 #include "coord.h"
 
+#if TEXT_MODE_PALETTIZED_COLOR
 /**
  * Type of the colors used in text cells.
  */
-typedef unsigned short text_color;
+typedef uint8_t text_color;
+#else
+/**
+ * Type of the colors used in text cells.
+ */
+typedef uint16_t text_color;
+#endif
 
 /**
  * Can change to 32 bits if you also need 32 bits per pixel
@@ -297,6 +304,11 @@ static inline void text_buffer_put_string(text_buffer* self, const char* str)
     while (*str != '\0')
         text_buffer_put_char(self, *str++);
 }
+
+/**
+ * Writes a string to the buffer with word wrap using the current font and colors and advances the cursor.
+ */
+void text_buffer_put_string_word_wrap(text_buffer* self, const char* str);
 
 /**
  * Writes a character to the buffer without changing font or colors and advances the cursor.

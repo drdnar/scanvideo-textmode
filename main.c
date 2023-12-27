@@ -16,7 +16,7 @@
 #include "cp437.h"
 
 // Implement full 800x480 at 180 MHz instead of 760x480 at 150 MHz.
-//#define FULL_RES
+#define FULL_RES
 // Use CP437 font instead
 //#define USE_CP437
 //#define CORE_1_IRQs
@@ -99,6 +99,19 @@ text_buffer main_buffer = STATIC_TEXT_BUFFER(TEXT_COLS, TEXT_ROWS, BRIGHT_WHITE,
 /** Current text screen to render from and write to. */
 text_buffer* current_buffer = &main_buffer;
 
+#if TEXT_MODE_PALETTIZED_COLOR
+/** Default palette for rendering. */
+uint16_t main_palette[] = {
+    // Since I wired up my TFT as 6 bits per pixel, just map each entry to its index.
+    0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F,
+    0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F,
+    0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28, 0x29, 0x2A, 0x2B, 0x2C, 0x2D, 0x2E, 0x2F,
+    0x30, 0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37, 0x38, 0x39, 0x3A, 0x3B, 0x3C, 0x3D, 0x3E, 0x3F,
+};
+/** Current palette for rendering. */
+uint16_t* current_palette = main_palette;
+#endif
+
 /** Custom timings for my 480x800 TFT. */
 const scanvideo_timing_t tft_timing_480x800_60_default = {
     .clock_freq = 30000000,
@@ -124,7 +137,7 @@ const scanvideo_timing_t tft_timing_480x800_60_default = {
 /** Custom mode for my TFT LCD. */
 const scanvideo_mode_t tft_mode_480x800_60 = {
     .default_timing = &tft_timing_480x800_60_default,
-    .pio_program = &video_24mhz_composable, // ??
+    .pio_program = &video_24mhz_composable,
     .width = WIDTH,
     .height = HEIGHT,
     .xscale = 1,
@@ -134,32 +147,54 @@ const scanvideo_mode_t tft_mode_480x800_60 = {
 
 
 #ifdef FULL_RES
-#define COLS_TO_RENDER (current_buffer->size.x)
-#else
-#ifndef USE_CP437
-#define COLS_TO_RENDER 96
-#else /* USE_CP437 is set */
-#define COLS_TO_RENDER 88
-#endif /* USE_CP437 */
+    #ifndef USE_CP437
+        #define COLS_TO_RENDER (current_buffer->size.x)
+    #else /* USE_CP437 */
+        // 88 is the maximum number of 9-pixel characters that fit on-screen.
+        #define COLS_TO_RENDER 88
+    #endif /* USE_CP437 */
+#else /* FULL_RES */
+    #ifndef USE_CP437
+        #if !TEXT_MODE_PALETTIZED_COLOR
+            #define COLS_TO_RENDER 96
+        #else /* TEXT_MODE_PALETTIZED_COLOR */
+            #define COLS_TO_RENDER 85
+        #endif /* TEXT_MODE_PALETTIZED_COLOR */
+    #else /* USE_CP437 is set */
+        #if !TEXT_MODE_PALETTIZED_COLOR
+            #define COLS_TO_RENDER 88
+        #else /* TEXT_MODE_PALETTIZED_COLOR */
+            #define COLS_TO_RENDER 79
+        #endif /* TEXT_MODE_PALETTIZED_COLOR */
+    #endif /* USE_CP437 */
 #endif /* FULL_RES */
 
 
-#define CORE_1_FUNC(RETURN, FUNC_NAME) __scratch_y(#FUNC_NAME) RETURN FUNC_NAME
+#define CORE_1_FUNC(FUNC_NAME) __scratch_y(#FUNC_NAME) FUNC_NAME
 
-static inline CORE_1_FUNC(uint16_t*, generate_line_byte_font)(uint16_t* write, unsigned scanline, text_buffer* screen, const text_mode_font* font)
+
+static inline uint16_t* CORE_1_FUNC(generate_line_byte_font)(uint16_t* write, unsigned scanline, text_buffer* screen, const text_mode_font* font)
 {
     divmod_result_t r = hw_divider_divmod_u32(scanline, font->scan_lines);
     uint32_t char_row = to_remainder_u32(r);
     uint32_t ignored1, ignored2, ignored3;
+    register int rjump_delta asm("r8") = 6 * (8 - font->scan_pixels) + 1; // +1 for Thumb mode
+    register int rwrite_inc asm("r9") = font->scan_pixels * 2;
+#if TEXT_MODE_PALETTIZED_COLOR
+    register uint16_t* rend asm("r10") = write + font->scan_pixels * COLS_TO_RENDER;
+#endif
     register uint32_t row asm("r5") = to_quotient_u32(r);
-    register text_color* rwrite asm("r0") = write;
+    register uint16_t* rwrite asm("r0") = write;
     register uint32_t rbytes asm("r1") = font->bytes_per_glyph;
     register text_cell* rread asm("r2") = text_buffer_cell(screen, 0, row);
     register uint8_t* rfont asm("r3") = (uint8_t*)font->data + char_row;
+#if !TEXT_MODE_PALETTIZED_COLOR
     register uint32_t rcols asm("r4") = COLS_TO_RENDER;
-    register int rjump_delta asm("r8") = 6 * (8 - font->scan_pixels) + 1; // +1 for Thumb mode
-    register int rwrite_inc asm("r9") = font->scan_pixels * 2;
     assert(sizeof(text_cell) == 6);
+#else
+    register uint16_t* rpalette asm("r4") = current_palette;
+    assert(sizeof(text_cell) == 4);
+#endif
     asm volatile(
         // This ends up being a bit over 4-5 cycles per pixel depending on how often it changes
         // between foreground and background color.  Since Latin scripts are mostly white space,
@@ -167,6 +202,34 @@ static inline CORE_1_FUNC(uint16_t*, generate_line_byte_font)(uint16_t* write, u
         // the (short two-stage) pipeline, so it'll average closer to 4 cycles per pixel.
         // But some semigraphical glyphs can alternate every pixel, so you still should plan for
         // the worst-case 5 cycles.
+#if !TEXT_MODE_PALETTIZED_COLOR
+        // Including loop overhead, it averages to about 7 cycles per pixel (worst-case).
+        "// Register allocations:\n"
+        "// r0: write pointer\n"
+        "// r1: bytes per glyph\n"
+        "// r2: read pointer\n"
+        "// r3: font pointer\n"
+        "// r4: column counter\n"
+        "// r5: bitmap\n"
+        "// r6: foreground color\n"
+        "// r7: background color\n"
+        "// r8: loop entry address\n"
+        "// r9: write increment\n"
+#else
+        // Including loop overhead, it averages to about 8 cycles per pixel (worst-case).
+        "// Register allocations:\n"
+        "// r0: write pointer\n"
+        "// r1: bytes per glyph\n"
+        "// r2: read pointer\n"
+        "// r3: font pointer\n"
+        "// r4: palette pointer\n"
+        "// r5: bitmap\n"
+        "// r6: foreground color\n"
+        "// r7: background color\n"
+        "// r8: loop entry address\n"
+        "// r9: write increment\n"
+        "// r10: write end address\n"
+#endif
         "// Cache loop start address\n"
         "    adr     r6, loop_entry%=\n"
         "    add     %[loopstart], r6\n"
@@ -176,9 +239,19 @@ static inline CORE_1_FUNC(uint16_t*, generate_line_byte_font)(uint16_t* write, u
         "    // and is really only useful if you need to save a register.\n"
         "    mul     %[bitmap], %[glyphsize], %[bitmap]\n"
         "    ldrb    %[bitmap], [%[bitmap], %[font]]\n"
+#if !TEXT_MODE_PALETTIZED_COLOR
         "    ldrh    r6, [%[read], #2]\n" // offset of text_cell.foreground
         "    ldrh    r7, [%[read], #4]\n" // offset of text_cell.background
         "    add     %[read], %[read], #6\n" // sizeof(text_cell)
+#else
+        "    ldrb    r6, [%[read], #2]\n" // offset of text_cell.foreground
+        "    ldrb    r7, [%[read], #3]\n" // offset of text_cell.background
+        "    add     %[read], %[read], #4\n" // sizeof(text_cell)
+        "    lsl     r6, r6, #1\n"
+        "    ldrh    r6, [%[palette], r6]\n"
+        "    lsl     r7, r7, #1\n"
+        "    ldrh    r7, [%[palette], r7]\n"
+#endif
         "// Unrolled loop\n"
         "    bx      %[loopstart]\n"
         ".balign 4 // ADR requires 32-bit alignment\n"
@@ -196,15 +269,29 @@ static inline CORE_1_FUNC(uint16_t*, generate_line_byte_font)(uint16_t* write, u
         resetbit(1)
         resetbit(0)
         "    add     %[write], %[writeinc]\n"
+#if !TEXT_MODE_PALETTIZED_COLOR
         "    sub     %[cols], #1\n"
+#else
+        "    cmp     %[end], %[write]\n"
+#endif
         "    beq     done%=\n"
         "// Fetch character and colors\n"
         "    ldrh    %[bitmap], [%[read], #0]\n"
         "    mul     %[bitmap], %[glyphsize], %[bitmap]\n"
         "    ldrb    %[bitmap], [%[bitmap], %[font]]\n"
+#if !TEXT_MODE_PALETTIZED_COLOR
         "    ldrh    r6, [%[read], #2]\n" // offset of text_cell.foreground
         "    ldrh    r7, [%[read], #4]\n" // offset of text_cell.background
         "    add     %[read], %[read], #6\n" // sizeof(text_cell)
+#else
+        "    ldrb    r6, [%[read], #2]\n" // offset of text_cell.foreground
+        "    ldrb    r7, [%[read], #3]\n" // offset of text_cell.background
+        "    add     %[read], %[read], #4\n" // sizeof(text_cell)
+        "    lsl     r6, r6, #1\n"
+        "    ldrh    r6, [%[palette], r6]\n"
+        "    lsl     r7, r7, #1\n"
+        "    ldrh    r7, [%[palette], r7]\n"
+#endif
         "    bx      %[loopstart]\n"
         // First iteration here is slightly different because there's no preshifting to be done.
 #define sethighbit(bit) "set" #bit "%=:\n" \
@@ -222,20 +309,38 @@ static inline CORE_1_FUNC(uint16_t*, generate_line_byte_font)(uint16_t* write, u
         setbit(1)
         setbit(0)
         "    add     %[write], %[writeinc]\n"
+#if !TEXT_MODE_PALETTIZED_COLOR
         "    sub     %[cols], #1\n"
+#else
+        "    cmp     %[end], %[write]\n"
+#endif
         "    beq     done%=\n"
         "// Fetch character and colors\n"
         "    ldrh    %[bitmap], [%[read], #0]\n"
         "    mul     %[bitmap], %[glyphsize], %[bitmap]\n"
         "    ldrb    %[bitmap], [%[bitmap], %[font]]\n"
+#if !TEXT_MODE_PALETTIZED_COLOR
         "    ldrh    r6, [%[read], #2]\n" // offset of text_cell.foreground
         "    ldrh    r7, [%[read], #4]\n" // offset of text_cell.background
         "    add     %[read], %[read], #6\n" // sizeof(text_cell)
+#else
+        "    ldrb    r6, [%[read], #2]\n" // offset of text_cell.foreground
+        "    ldrb    r7, [%[read], #3]\n" // offset of text_cell.background
+        "    add     %[read], %[read], #4\n" // sizeof(text_cell)
+        "    lsl     r6, r6, #1\n"
+        "    ldrh    r6, [%[palette], r6]\n"
+        "    lsl     r7, r7, #1\n"
+        "    ldrh    r7, [%[palette], r7]\n"
+#endif
         "    bx      %[loopstart]\n"
         "done%=:"
      :  [read]     "=r" (ignored1),
         [write]    "=r" (write),
+#if !TEXT_MODE_PALETTIZED_COLOR
         [cols]     "=r" (ignored2),
+//#else
+//        [palette]  "=r" (ignored2),
+#endif
         [loopstart]"=r" (rjump_delta),
         [bitmap]   "=r" (ignored3)
      : "[write]"        (rwrite),
@@ -245,7 +350,12 @@ static inline CORE_1_FUNC(uint16_t*, generate_line_byte_font)(uint16_t* write, u
        "[loopstart]""r" (rjump_delta),
         [writeinc] "r"  (rwrite_inc),
        "[bitmap]"  "r"  (row),
+#if !TEXT_MODE_PALETTIZED_COLOR
        "[cols]"    "r"  (rcols)
+#else
+        [palette]  "r"  (rpalette),
+        [end]      "r"  (rend)
+#endif
      : "cc", "memory",
        "r6", "r7"
     );
@@ -256,20 +366,28 @@ static inline CORE_1_FUNC(uint16_t*, generate_line_byte_font)(uint16_t* write, u
 }
 
 
-static inline CORE_1_FUNC(uint16_t*, generate_line_short_font)(uint16_t* write, unsigned scanline, text_buffer* screen, const text_mode_font* font)
+static inline uint16_t* CORE_1_FUNC(generate_line_short_font)(uint16_t* write, unsigned scanline, text_buffer* screen, const text_mode_font* font)
 {
     divmod_result_t r = hw_divider_divmod_u32(scanline, font->scan_lines);
     uint32_t char_row = to_remainder_u32(r);
     uint32_t ignored1, ignored2, ignored3;
+    register int rjump_delta asm("r8") = 6 * (16 - font->scan_pixels) + 1; // +1 for Thumb mode
+    register int rwrite_inc asm("r9") = font->scan_pixels * 2;
+#if TEXT_MODE_PALETTIZED_COLOR
+    register uint16_t* rend asm("r10") = write + font->scan_pixels * COLS_TO_RENDER;
+#endif
     register uint32_t row asm("r5") = to_quotient_u32(r);
-    register text_color* rwrite asm("r0") = write;
+    register uint16_t* rwrite asm("r0") = write;
     register uint32_t rbytes asm("r1") = font->bytes_per_glyph;
     register text_cell* rread asm("r2") = text_buffer_cell(screen, 0, row);
     register uint16_t* rfont asm("r3") = (uint16_t*)font->data + char_row;
+#if !TEXT_MODE_PALETTIZED_COLOR
     register uint32_t rcols asm("r4") = COLS_TO_RENDER;
-    register int rjump_delta asm("r8") = 6 * (16 - font->scan_pixels) + 1; // +1 for Thumb mode
-    register int rwrite_inc asm("r9") = font->scan_pixels * 2;
     assert(sizeof(text_cell) == 6);
+#else
+    register uint16_t* rpalette asm("r4") = current_palette;
+    assert(sizeof(text_cell) == 4);
+#endif
     asm volatile(
         // This ends up being a bit over 4-5 cycles per pixel depending on how often it changes
         // between foreground and background color.  Since Latin scripts are mostly white space,
@@ -277,6 +395,36 @@ static inline CORE_1_FUNC(uint16_t*, generate_line_short_font)(uint16_t* write, 
         // the (short two-stage) pipeline, so it'll average closer to 4 cycles per pixel.
         // But some semigraphical glyphs can alternate every pixel, so you still should plan for
         // the worst-case 5 cycles.
+#if !TEXT_MODE_PALETTIZED_COLOR
+        // Including loop overhead, it averages to 6-7 cycles per pixel (worst-case) depending on the glyph width.
+        // (The wider the glyph, the less impact the loop overhead has.)
+        "// Register allocations:\n"
+        "// r0: write pointer\n"
+        "// r1: bytes per glyph\n"
+        "// r2: read pointer\n"
+        "// r3: font pointer\n"
+        "// r4: column counter\n"
+        "// r5: bitmap\n"
+        "// r6: foreground color\n"
+        "// r7: background color\n"
+        "// r8: loop entry address\n"
+        "// r9: write increment\n"
+#else
+        // Including loop overhead, it averages to 7-8 cycles per pixel (worst-case) depending on the glyph width.
+        // (The wider the glyph, the less impact the loop overhead has.)
+        "// Register allocations:\n"
+        "// r0: write pointer\n"
+        "// r1: bytes per glyph\n"
+        "// r2: read pointer\n"
+        "// r3: font pointer\n"
+        "// r4: palette pointer\n"
+        "// r5: bitmap\n"
+        "// r6: foreground color\n"
+        "// r7: background color\n"
+        "// r8: loop entry address\n"
+        "// r9: write increment\n"
+        "// r10: write end address\n"
+#endif
         "// Cache loop start address\n"
         "    adr     r6, loop_entry%=\n"
         "    add     %[loopstart], r6\n"
@@ -286,9 +434,19 @@ static inline CORE_1_FUNC(uint16_t*, generate_line_short_font)(uint16_t* write, 
         "    // and is really only useful if you need to save a register.\n"
         "    mul     %[bitmap], %[glyphsize], %[bitmap]\n"
         "    ldrh    %[bitmap], [%[bitmap], %[font]]\n"
+#if !TEXT_MODE_PALETTIZED_COLOR
         "    ldrh    r6, [%[read], #2]\n" // offset of text_cell.foreground
         "    ldrh    r7, [%[read], #4]\n" // offset of text_cell.background
         "    add     %[read], %[read], #6\n" // sizeof(text_cell)
+#else
+        "    ldrb    r6, [%[read], #2]\n" // offset of text_cell.foreground
+        "    ldrb    r7, [%[read], #3]\n" // offset of text_cell.background
+        "    add     %[read], %[read], #4\n" // sizeof(text_cell)
+        "    lsl     r6, r6, #1\n"
+        "    ldrh    r6, [%[palette], r6]\n"
+        "    lsl     r7, r7, #1\n"
+        "    ldrh    r7, [%[palette], r7]\n"
+#endif
         "// Unrolled loop\n"
         "    bx      %[loopstart]\n"
         ".balign 4 // ADR requires 32-bit alignment\n"
@@ -314,15 +472,29 @@ static inline CORE_1_FUNC(uint16_t*, generate_line_short_font)(uint16_t* write, 
         resetbit(1)
         resetbit(0)
         "    add     %[write], %[writeinc]\n"
+#if !TEXT_MODE_PALETTIZED_COLOR
         "    sub     %[cols], #1\n"
+#else
+        "    cmp     %[end], %[write]\n"
+#endif
         "    beq     done%=\n"
         "// Fetch character and colors\n"
         "    ldrh    %[bitmap], [%[read], #0]\n"
         "    mul     %[bitmap], %[glyphsize], %[bitmap]\n"
         "    ldrh    %[bitmap], [%[bitmap], %[font]]\n"
+#if !TEXT_MODE_PALETTIZED_COLOR
         "    ldrh    r6, [%[read], #2]\n" // offset of text_cell.foreground
         "    ldrh    r7, [%[read], #4]\n" // offset of text_cell.background
         "    add     %[read], %[read], #6\n" // sizeof(text_cell)
+#else
+        "    ldrb    r6, [%[read], #2]\n" // offset of text_cell.foreground
+        "    ldrb    r7, [%[read], #3]\n" // offset of text_cell.background
+        "    add     %[read], %[read], #4\n" // sizeof(text_cell)
+        "    lsl     r6, r6, #1\n"
+        "    ldrh    r6, [%[palette], r6]\n"
+        "    lsl     r7, r7, #1\n"
+        "    ldrh    r7, [%[palette], r7]\n"
+#endif
         "    bx      %[loopstart]\n"
         // First iteration here is slightly different because there's no preshifting to be done.
 #define sethighbit(bit) "set" #bit "%=:\n" \
@@ -348,20 +520,38 @@ static inline CORE_1_FUNC(uint16_t*, generate_line_short_font)(uint16_t* write, 
         setbit(1)
         setbit(0)
         "    add     %[write], %[writeinc]\n"
+#if !TEXT_MODE_PALETTIZED_COLOR
         "    sub     %[cols], #1\n"
+#else
+        "    cmp     %[end], %[write]\n"
+#endif
         "    beq     done%=\n"
         "// Fetch character and colors\n"
         "    ldrh    %[bitmap], [%[read], #0]\n"
         "    mul     %[bitmap], %[glyphsize], %[bitmap]\n"
         "    ldrh    %[bitmap], [%[bitmap], %[font]]\n"
+#if !TEXT_MODE_PALETTIZED_COLOR
         "    ldrh    r6, [%[read], #2]\n" // offset of text_cell.foreground
         "    ldrh    r7, [%[read], #4]\n" // offset of text_cell.background
         "    add     %[read], %[read], #6\n" // sizeof(text_cell)
+#else
+        "    ldrb    r6, [%[read], #2]\n" // offset of text_cell.foreground
+        "    ldrb    r7, [%[read], #3]\n" // offset of text_cell.background
+        "    add     %[read], %[read], #4\n" // sizeof(text_cell)
+        "    lsl     r6, r6, #1\n"
+        "    ldrh    r6, [%[palette], r6]\n"
+        "    lsl     r7, r7, #1\n"
+        "    ldrh    r7, [%[palette], r7]\n"
+#endif
         "    bx      %[loopstart]\n"
         "done%=:"
     :  [read]     "=r" (ignored1),
        [write]    "=r" (write),
+#if !TEXT_MODE_PALETTIZED_COLOR
        [cols]     "=r" (ignored2),
+//#else
+//      "[palette]" "=r" (ignored2),
+#endif
        [loopstart]"=r" (rjump_delta),
        [bitmap]   "=r" (ignored3)
     : "[write]"        (write),
@@ -371,7 +561,12 @@ static inline CORE_1_FUNC(uint16_t*, generate_line_short_font)(uint16_t* write, 
       "[loopstart]""r" (rjump_delta),
        [writeinc] "r"  (rwrite_inc),
       "[bitmap]"  "r"  (row),
+#if !TEXT_MODE_PALETTIZED_COLOR
       "[cols]"    "r"  (rcols)
+#else
+       [palette]  "r"  (rpalette),
+       [end]      "r"  (rend)
+#endif
     : "cc", "memory",
       "r6", "r7"
     );
@@ -382,7 +577,7 @@ static inline CORE_1_FUNC(uint16_t*, generate_line_short_font)(uint16_t* write, 
 }
 
 
-CORE_1_FUNC(void, run_video)()
+void CORE_1_FUNC(run_video)()
 {
 #ifdef CORE_1_IRQs
     scanvideo_setup(&tft_mode_480x800_60);
@@ -406,7 +601,7 @@ CORE_1_FUNC(void, run_video)()
         length[0] = length[1];
         size_t count = write - length - 1;
         length[1] = count;
-        if ((count & 1)) {
+        if (count & 1) {
             *write++ = COMPOSABLE_EOL_ALIGN;
         } else {
             *write++ = COMPOSABLE_EOL_SKIP_ALIGN;
@@ -426,9 +621,25 @@ CORE_1_FUNC(void, run_video)()
 int main()
 {
 #ifdef FULL_RES
-    set_sys_clock_khz(180000, true);
+    #if !TEXT_MODE_PALETTIZED_COLOR
+        set_sys_clock_khz(180000, true);
+    #else
+        #ifndef CORE_1_IRQs
+            set_sys_clock_khz(180000, true);
+        #else
+            set_sys_clock_khz(210000, true);
+        #endif
+    #endif
 #else
-    set_sys_clock_khz(150000, true);
+    #if !TEXT_MODE_PALETTIZED_COLOR
+        #ifndef CORE_1_IRQs
+            set_sys_clock_khz(150000, true);
+        #else
+            set_sys_clock_khz(180000, true);
+        #endif
+    #else
+        set_sys_clock_khz(180000, true);
+    #endif
 #endif
     stdio_init_all(); // Enable UART
     // Init GPIOs

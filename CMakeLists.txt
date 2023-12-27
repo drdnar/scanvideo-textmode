@@ -28,6 +28,7 @@ target_compile_definitions(scanvideotest PRIVATE
 )
 
 target_compile_definitions(scanvideotest PUBLIC
+    TEXT_MODE_PALETTIZED_COLOR=0
     PICO_SCANVIDEO_MAX_SCANLINE_BUFFER_WORDS=1024
     PICO_SCANVIDEO_SCANLINE_BUFFER_COUNT=4
     PICO_SCANVIDEO_COLOR_PIN_BASE=0

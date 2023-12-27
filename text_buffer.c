@@ -43,3 +43,12 @@ void text_buffer_scroll_down_lines(text_buffer* self, unsigned n)
     for (size_t i = 0; i < delta; i++)
         ptr[i] = blank;
 }
+
+
+void text_buffer_put_string_word_wrap(text_buffer* self, const char* str)
+{
+    // TODO
+    while (*str != '\0')
+        text_buffer_put_char(self, *str++);
+
+}
