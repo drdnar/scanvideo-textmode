@@ -17,6 +17,7 @@ set(PICO_NO_FLASH 1)
 target_sources(scanvideotest PUBLIC
     main.c
     text_buffer.c
+    text_window.c
     monofonts12_normal.c
     cp437.c
 )

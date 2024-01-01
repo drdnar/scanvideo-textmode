@@ -12,8 +12,17 @@
 #include "hardware/irq.h"
 
 #include "text_buffer.h"
+#include "text_window.h"
 #include "monofonts12.h"
 #include "cp437.h"
+
+
+////////////////////////////////////////////////////////////////////////////////
+/////// CONFIGURATION //////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
+// Putting defines in CMakeLists.txt results in the whole project being
+// recompiled even though these settings only affect this file.
+// So these settings just live in this file.
 
 // Implement full 800x480 at 180 MHz instead of 760x480 at 150 MHz.
 #define FULL_RES
@@ -21,26 +30,74 @@
 //#define USE_CP437
 //#define CORE_1_IRQs
 
+#define HEIGHT 480
+#define WIDTH 800
+#define VIDEO_MODE tft_mode_480x800_60
+/* If you change the screen resolution, you may want to override these because the limits chosen
+below are calibrated specifically for my 800x480 TFT.
+#define TEXT_ROWS 40
+#define TEXT_COLS 100
+*/
 
+// Adjust text buffer size to match screen size and what can be rendered fast enough.
 #ifdef USE_CP437
-/** Left double-quote */
-#define LDQ "\""
-/** Right double-quote */
-#define RDQ "\""
-/** Apostrophe */
-#define APS "'"
-/** Em dash */
-#define EMD "\304"
-#else
-/** Left double-quote */
-#define LDQ "\223"
-/** Right double-quote */
-#define RDQ "\224"
-/** Apostrophe */
-#define APS "\222"
-/** Em dash */
-#define EMD "\227"
+    // Row 35 doesn't fit fully but the render routine doesn't know how to handle having blank lines
+    // at the bottom.  So just add a 35th line so there's valid data to render even though it
+    // gets cut off.
+    #ifndef TEXT_ROWS
+        // 35
+        #define TEXT_ROWS ((HEIGHT + CP437_FONT_HEIGHT - 1) / CP437_FONT_HEIGHT)
+    #endif
+    #ifndef TEXT_COLS
+        #ifdef FULL_RES
+            // 88
+            #define TEXT_COLS ((WIDTH + CP437_FONT_WIDTH - 1) / CP437_FONT_WIDTH)
+        #else /* not FULL_RES */
+            #if !TEXT_MODE_PALETTIZED_COLOR
+                // 88
+                #define TEXT_COLS ((WIDTH + CP437_FONT_WIDTH - 1) / CP437_FONT_WIDTH)
+            #else /* TEXT_MODE_PALETTIZED_COLOR */
+                #define TEXT_COLS 79
+            #endif /* TEXT_MODE_PALETTIZED_COLOR */
+        #endif /* FULL_RES */
+    #endif
+#else /* not USE_CP437 */
+    #ifndef TEXT_ROWS
+        // 40
+        #define TEXT_ROWS ((HEIGHT + MONO_FONT_HEIGHT - 1) / MONO_FONT_HEIGHT)
+    #endif
+    #ifndef TEXT_COLS
+        #ifdef FULL_RES
+            // 100
+            #define TEXT_COLS ((WIDTH + MONO_FONT_WIDTH - 1) / MONO_FONT_WIDTH)
+        #else /* not FULL_RES */
+            #if !TEXT_MODE_PALETTIZED_COLOR
+                #define TEXT_COLS 96
+            #else /* TEXT_MODE_PALETTIZED_COLOR */
+                #define TEXT_COLS 85
+            #endif /* TEXT_MODE_PALETTIZED_COLOR */
+        #endif /* FULL_RES */
+    #endif
+#endif /* USE_CP437 */
+
+#if TEXT_MODE_PALETTIZED_COLOR
+/** Default palette for rendering. */
+uint16_t main_palette[] = {
+    // Since I wired up my TFT as 6 bits per pixel, just map each entry to its index.
+    // You can override this with your own palette here.
+    0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F,
+    0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F,
+    0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28, 0x29, 0x2A, 0x2B, 0x2C, 0x2D, 0x2E, 0x2F,
+    0x30, 0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37, 0x38, 0x39, 0x3A, 0x3B, 0x3C, 0x3D, 0x3E, 0x3F,
+};
+/** Current palette for rendering. */
+uint16_t* current_palette = main_palette;
 #endif
+
+
+////////////////////////////////////////////////////////////////////////////////
+/////// 800 x 480 TFT LCD CONFIGURATION ////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
 
 /** Reverse horizontal scan direction */
 #define MIRROR_PIN 18
@@ -82,36 +139,6 @@ enum COLORS6BPP
     BRIGHT_WHITE  = 0b111111,
 };
 
-#define HEIGHT 480
-#define WIDTH 800
-#define TEXT_ROWS 40
-#define TEXT_COLS 100
-
-/** Currently active font. */
-#ifndef USE_CP437
-const text_mode_font* current_font = &mono_font_12_normal;
-#else
-const text_mode_font* current_font = &cp437;
-#endif
-
-/** Main text buffer for rendering. */
-text_buffer main_buffer = STATIC_TEXT_BUFFER(TEXT_COLS, TEXT_ROWS, BRIGHT_WHITE, BLACK, ' ', 0);
-/** Current text screen to render from and write to. */
-text_buffer* current_buffer = &main_buffer;
-
-#if TEXT_MODE_PALETTIZED_COLOR
-/** Default palette for rendering. */
-uint16_t main_palette[] = {
-    // Since I wired up my TFT as 6 bits per pixel, just map each entry to its index.
-    0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F,
-    0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F,
-    0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28, 0x29, 0x2A, 0x2B, 0x2C, 0x2D, 0x2E, 0x2F,
-    0x30, 0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37, 0x38, 0x39, 0x3A, 0x3B, 0x3C, 0x3D, 0x3E, 0x3F,
-};
-/** Current palette for rendering. */
-uint16_t* current_palette = main_palette;
-#endif
-
 /** Custom timings for my 480x800 TFT. */
 const scanvideo_timing_t tft_timing_480x800_60_default = {
     .clock_freq = 30000000,
@@ -130,7 +157,7 @@ const scanvideo_timing_t tft_timing_480x800_60_default = {
     .v_sync_polarity = 1,
 
     .enable_clock = 1,
-    .clock_polarity = 1,
+    .clock_polarity = 0,
 
     .enable_den = 0
 };
@@ -146,32 +173,52 @@ const scanvideo_mode_t tft_mode_480x800_60 = {
 };
 
 
-#ifdef FULL_RES
-    #ifndef USE_CP437
-        #define COLS_TO_RENDER (current_buffer->size.x)
-    #else /* USE_CP437 */
-        // 88 is the maximum number of 9-pixel characters that fit on-screen.
-        #define COLS_TO_RENDER 88
-    #endif /* USE_CP437 */
-#else /* FULL_RES */
-    #ifndef USE_CP437
-        #if !TEXT_MODE_PALETTIZED_COLOR
-            #define COLS_TO_RENDER 96
-        #else /* TEXT_MODE_PALETTIZED_COLOR */
-            #define COLS_TO_RENDER 85
-        #endif /* TEXT_MODE_PALETTIZED_COLOR */
-    #else /* USE_CP437 is set */
-        #if !TEXT_MODE_PALETTIZED_COLOR
-            #define COLS_TO_RENDER 88
-        #else /* TEXT_MODE_PALETTIZED_COLOR */
-            #define COLS_TO_RENDER 79
-        #endif /* TEXT_MODE_PALETTIZED_COLOR */
-    #endif /* USE_CP437 */
-#endif /* FULL_RES */
+////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
 
+#ifdef USE_CP437
+/** Left double-quote */
+#define LDQ "\""
+/** Right double-quote */
+#define RDQ "\""
+/** Apostrophe */
+#define APS "'"
+/** Em dash */
+#define EMD "\304"
+#else
+/** Left double-quote */
+#define LDQ "\223"
+/** Right double-quote */
+#define RDQ "\224"
+/** Apostrophe */
+#define APS "\222"
+/** Em dash */
+#define EMD "\227"
+#endif
+
+
+////////////////////////////////////////////////////////////////////////////////
+/////// GLOBAL VARIABLES ///////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
+
+/** Currently active font. */
+#ifndef USE_CP437
+const text_mode_font* current_font = &mono_font_12_normal;
+#else
+const text_mode_font* current_font = &cp437;
+#endif
+
+/** Main text buffer for rendering. */
+text_buffer main_buffer = STATIC_TEXT_BUFFER(TEXT_COLS, TEXT_ROWS, BRIGHT_WHITE, BLACK, ' ', 0);
+/** Current text screen to render from and write to. */
+text_buffer* current_buffer = &main_buffer;
+
+
+////////////////////////////////////////////////////////////////////////////////
+/////// RENDER ROUTINES ////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
 
 #define CORE_1_FUNC(FUNC_NAME) __scratch_y(#FUNC_NAME) FUNC_NAME
-
 
 static inline uint16_t* CORE_1_FUNC(generate_line_byte_font)(uint16_t* write, unsigned scanline, text_buffer* screen, const text_mode_font* font)
 {
@@ -181,7 +228,7 @@ static inline uint16_t* CORE_1_FUNC(generate_line_byte_font)(uint16_t* write, un
     register int rjump_delta asm("r8") = 6 * (8 - font->scan_pixels) + 1; // +1 for Thumb mode
     register int rwrite_inc asm("r9") = font->scan_pixels * 2;
 #if TEXT_MODE_PALETTIZED_COLOR
-    register uint16_t* rend asm("r10") = write + font->scan_pixels * COLS_TO_RENDER;
+    register uint16_t* rend asm("r10") = write + font->scan_pixels * screen->size.x;
 #endif
     register uint32_t row asm("r5") = to_quotient_u32(r);
     register uint16_t* rwrite asm("r0") = write;
@@ -189,7 +236,7 @@ static inline uint16_t* CORE_1_FUNC(generate_line_byte_font)(uint16_t* write, un
     register text_cell* rread asm("r2") = text_buffer_cell(screen, 0, row);
     register uint8_t* rfont asm("r3") = (uint8_t*)font->data + char_row;
 #if !TEXT_MODE_PALETTIZED_COLOR
-    register uint32_t rcols asm("r4") = COLS_TO_RENDER;
+    register uint32_t rcols asm("r4") = screen->size.x;
     assert(sizeof(text_cell) == 6);
 #else
     register uint16_t* rpalette asm("r4") = current_palette;
@@ -202,33 +249,22 @@ static inline uint16_t* CORE_1_FUNC(generate_line_byte_font)(uint16_t* write, un
         // the (short two-stage) pipeline, so it'll average closer to 4 cycles per pixel.
         // But some semigraphical glyphs can alternate every pixel, so you still should plan for
         // the worst-case 5 cycles.
+        // Register allocations:
+        // r0: write pointer
+        // r1: bytes per glyph
+        // r2: read pointer
+        // r3: font pointer
+        // r4: column counter or palette pointer
+        // r5: bitmap
+        // r6: foreground color
+        // r7: background color
+        // r8: loop entry address
+        // r9: write increment
+        // r10: write end address in palette mode
 #if !TEXT_MODE_PALETTIZED_COLOR
         // Including loop overhead, it averages to about 7 cycles per pixel (worst-case).
-        "// Register allocations:\n"
-        "// r0: write pointer\n"
-        "// r1: bytes per glyph\n"
-        "// r2: read pointer\n"
-        "// r3: font pointer\n"
-        "// r4: column counter\n"
-        "// r5: bitmap\n"
-        "// r6: foreground color\n"
-        "// r7: background color\n"
-        "// r8: loop entry address\n"
-        "// r9: write increment\n"
 #else
         // Including loop overhead, it averages to about 8 cycles per pixel (worst-case).
-        "// Register allocations:\n"
-        "// r0: write pointer\n"
-        "// r1: bytes per glyph\n"
-        "// r2: read pointer\n"
-        "// r3: font pointer\n"
-        "// r4: palette pointer\n"
-        "// r5: bitmap\n"
-        "// r6: foreground color\n"
-        "// r7: background color\n"
-        "// r8: loop entry address\n"
-        "// r9: write increment\n"
-        "// r10: write end address\n"
 #endif
         "// Cache loop start address\n"
         "    adr     r6, loop_entry%=\n"
@@ -338,8 +374,6 @@ static inline uint16_t* CORE_1_FUNC(generate_line_byte_font)(uint16_t* write, un
         [write]    "=r" (write),
 #if !TEXT_MODE_PALETTIZED_COLOR
         [cols]     "=r" (ignored2),
-//#else
-//        [palette]  "=r" (ignored2),
 #endif
         [loopstart]"=r" (rjump_delta),
         [bitmap]   "=r" (ignored3)
@@ -374,7 +408,7 @@ static inline uint16_t* CORE_1_FUNC(generate_line_short_font)(uint16_t* write, u
     register int rjump_delta asm("r8") = 6 * (16 - font->scan_pixels) + 1; // +1 for Thumb mode
     register int rwrite_inc asm("r9") = font->scan_pixels * 2;
 #if TEXT_MODE_PALETTIZED_COLOR
-    register uint16_t* rend asm("r10") = write + font->scan_pixels * COLS_TO_RENDER;
+    register uint16_t* rend asm("r10") = write + font->scan_pixels * screen->size.x;
 #endif
     register uint32_t row asm("r5") = to_quotient_u32(r);
     register uint16_t* rwrite asm("r0") = write;
@@ -382,7 +416,7 @@ static inline uint16_t* CORE_1_FUNC(generate_line_short_font)(uint16_t* write, u
     register text_cell* rread asm("r2") = text_buffer_cell(screen, 0, row);
     register uint16_t* rfont asm("r3") = (uint16_t*)font->data + char_row;
 #if !TEXT_MODE_PALETTIZED_COLOR
-    register uint32_t rcols asm("r4") = COLS_TO_RENDER;
+    register uint32_t rcols asm("r4") = screen->size.x;
     assert(sizeof(text_cell) == 6);
 #else
     register uint16_t* rpalette asm("r4") = current_palette;
@@ -395,35 +429,24 @@ static inline uint16_t* CORE_1_FUNC(generate_line_short_font)(uint16_t* write, u
         // the (short two-stage) pipeline, so it'll average closer to 4 cycles per pixel.
         // But some semigraphical glyphs can alternate every pixel, so you still should plan for
         // the worst-case 5 cycles.
+        // Register allocations:
+        // r0: write pointer
+        // r1: bytes per glyph
+        // r2: read pointer
+        // r3: font pointer
+        // r4: column counter or palette pointer
+        // r5: bitmap
+        // r6: foreground color
+        // r7: background color
+        // r8: loop entry address
+        // r9: write increment
+        // r10: write end address in palette mode
 #if !TEXT_MODE_PALETTIZED_COLOR
         // Including loop overhead, it averages to 6-7 cycles per pixel (worst-case) depending on the glyph width.
         // (The wider the glyph, the less impact the loop overhead has.)
-        "// Register allocations:\n"
-        "// r0: write pointer\n"
-        "// r1: bytes per glyph\n"
-        "// r2: read pointer\n"
-        "// r3: font pointer\n"
-        "// r4: column counter\n"
-        "// r5: bitmap\n"
-        "// r6: foreground color\n"
-        "// r7: background color\n"
-        "// r8: loop entry address\n"
-        "// r9: write increment\n"
 #else
         // Including loop overhead, it averages to 7-8 cycles per pixel (worst-case) depending on the glyph width.
         // (The wider the glyph, the less impact the loop overhead has.)
-        "// Register allocations:\n"
-        "// r0: write pointer\n"
-        "// r1: bytes per glyph\n"
-        "// r2: read pointer\n"
-        "// r3: font pointer\n"
-        "// r4: palette pointer\n"
-        "// r5: bitmap\n"
-        "// r6: foreground color\n"
-        "// r7: background color\n"
-        "// r8: loop entry address\n"
-        "// r9: write increment\n"
-        "// r10: write end address\n"
 #endif
         "// Cache loop start address\n"
         "    adr     r6, loop_entry%=\n"
@@ -549,8 +572,6 @@ static inline uint16_t* CORE_1_FUNC(generate_line_short_font)(uint16_t* write, u
        [write]    "=r" (write),
 #if !TEXT_MODE_PALETTIZED_COLOR
        [cols]     "=r" (ignored2),
-//#else
-//      "[palette]" "=r" (ignored2),
 #endif
        [loopstart]"=r" (rjump_delta),
        [bitmap]   "=r" (ignored3)
@@ -580,7 +601,7 @@ static inline uint16_t* CORE_1_FUNC(generate_line_short_font)(uint16_t* write, u
 void CORE_1_FUNC(run_video)()
 {
 #ifdef CORE_1_IRQs
-    scanvideo_setup(&tft_mode_480x800_60);
+    scanvideo_setup(&VIDEO_MODE);
     scanvideo_timing_enable(true);
 #endif
     while (true) {
@@ -615,11 +636,16 @@ void CORE_1_FUNC(run_video)()
 }
 
 
+////////////////////////////////////////////////////////////////////////////////
+/////// MAIN ///////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
+
 /** Initialize a GPIO pin for output and set it to a default value. */
 #define gpio_init_out(PIN, DEFAULT) gpio_init(PIN); gpio_set_dir(PIN, 1); gpio_put(PIN, DEFAULT)
 
 int main()
 {
+    // Adjust CPU speed to be as fast as needed for selected options
 #ifdef FULL_RES
     #if !TEXT_MODE_PALETTIZED_COLOR
         set_sys_clock_khz(180000, true);
@@ -645,6 +671,7 @@ int main()
     // Init GPIOs
     gpio_init(PICO_DEFAULT_LED_PIN);
     gpio_set_dir(PICO_DEFAULT_LED_PIN, 1);
+    /// 800x480 TFT: Initialize control signals ////////////////////////////////
     gpio_init_out(MIRROR_PIN, 1);
     gpio_init_out(UPSIDE_DOWN_PIN, 0);
     gpio_init_out(RESET_PIN, 0);
@@ -659,68 +686,76 @@ int main()
     pwm_set_clkdiv_int_frac(slice, 2, 1);
     pwm_set_enabled(slice, true);
     pwm_set_gpio_level(PWM_PIN, 0);
+    /// end 800x480 TFT ////////////////////////////////////////////////////////
     
     printf("\nHW init complete. ");
 
+    // Display test text
     current_buffer->colors.foreground = BLACK;
     current_buffer->colors.background = BRIGHT_WHITE;
-#ifndef USE_CP437
-    current_buffer->font = MONO_FONT_BOLD;
-#else
-    main_buffer.font = 0;
-#endif
-    text_buffer_put_string(current_buffer,
-    //   00        10        20        30        40        50        60        70        80        90
-    //  <123456789 123456789 123456789 123456789 123456789 123456789 123456789 123456789 123456789 123456789 >
-        "                                            I Have a Dream                                          "
+    const char* title = "The Picture of Dorian Gray";
+    text_window title_window;
+    text_window_ctor_in_place(&title_window, current_buffer, (coord){ 0, 0 },
+        (coord){ current_buffer->size.x, 2 }
     );
 #ifndef USE_CP437
-    main_buffer.font = MONO_FONT_REGULAR;
+    title_window.font = MONO_FONT_BOLD;
 #endif
-    text_buffer_put_string(current_buffer,
-        "I am happy to join with you today in what will go down in history as the greatest demonstration for " //  1
-        "freedom in the history of our nation.                                                               " //  2
-        "Five score years ago, a great American, in whose symbolic shadow we stand today, signed the         " //  3
-        "Emancipation Proclamation.  This momentous decree came as a great beacon light of hope to millions  " //  4
-        "of Negro slaves who had been seared in the flames of withering injustice.  It came as a joyous      " //  5
-        "daybreak to end the long night of their captivity.                                                  " //  6
-        "But 100 years later, the Negro still is not free.  One hundred years later, the life of the Negro is" //  7
-        "still sadly crippled by the manacles of segregation and the chains of discrimination.  One hundred  " //  8
-        "years later, the Negro lives on a lonely island of poverty in the midst of a vast ocean of material " //  9
-        "prosperity.  One hundred years later, the Negro is still languished in the corners of American      " // 10
-        "society and finds himself an exile in his own land.                                                 " // 11
-        "And so we"APS"ve come here today to dramatize the same cruel condition.  In a sense we"APS"ve come to our   " // 12
-        "nation"APS"s capital to cash a cheque.  When the architects of our republic wrote the magnificent words " // 13
-        "of the Constitution and the Declaration of Independence, they were signing a promissory note to     " // 14
-        "which every American was to fall heir.  This note was a promise that all men"EMD"yes, black men as well " // 15
-        "as white men"EMD"would be guaranteed the inalienable rights of "LDQ"Life, Liberty, and the pursuit of       " // 16
-        "Happiness."RDQ"                                                                                         " // 17
-        "It is obvious today that America has defaulted on this promissory note insofar as her citizens of   " // 18
-        "color are concerned.  Instead of honoring this sacred obligation, America has given the Negro people" // 19
-        "a bad cheque, a cheque which has come back marked "LDQ"insufficient funds."RDQ"  But we refuse to believe   " // 20
-        "that the bank of justice is bankrupt.  We refuse to believe that there are insufficient funds in the" // 21
-        "great vaults of opportunity of this nation.  So we"APS"ve come to cash this cheque"EMD"a cheque that will   " // 22
-        "give us upon demand the riches of freedom and the security of justice.                              " // 23
-        "We have also come to this hallowed spot to remind America of the fierce urgency of now.  This is no " // 24
-        "time to engage in the luxury of cooling off or to take the tranquilizing drug of gradualism.  Now is" // 25
-        "the time to make real the promises of democracy.  Now is the time to rise from the dark and desolate" // 26
-        "valley of segregation to the sunlit path of racial justice.  Now is the time to lift our nation from" // 27
-        "the quicksands of racial injustice to the solid rock of brotherhood.  Now is the time to make       " // 28
-        "justice a reality for all of God"APS"s children.                                                        " // 29
-        "It would be fatal for the nation to overlook the urgency of the moment.  This sweltering summer of  " // 30
-        "the Negro"APS"s legitimate discontent will not pass until there is an invigorating autumn of freedom and" // 31
-        "equality.  1963 is not an end, but a beginning.  Those who hope that the Negro needed to blow off   " // 32
-        "steam and will now be content will have a rude awakening if the nation returns to business as usual." // 33
-        "There will be neither rest nor tranquillity in America until the Negro is granted his citizenship   " // 34
-        "rights.  The whirlwinds of revolt will continue to shake the foundations of our nation until the    " // 35
-        "bright day of justice emerges.                                                                      " // 36
-        "But there is something that I must say to my people, who stand on the warm threshold which leads    " // 37
-        "into the palace of justice: in the process of gaining our rightful place we must not be guilty of   " // 38
-        "wrongful deeds.  Let us not seek to satisfy our thirst for freedom by drinking from the cup of      " // 39
-        //"bitterness and hatred.  We must forever conduct our struggle on the high plane of dignity and       " // 40
-        //"discipline.  We must not allow our creative protest to degenerate into physical violence.  Again and" // 41
-        //"again we must rise to the majestic heights of meeting physical force with soul force.               " // 42
+    text_window_put_string_centered_line(&title_window, "The Picture of Dorian Gray");
+    text_window_newline_no_scroll(&title_window);
+    text_window_put_string_centered_line(&title_window, "Oscar Wilde");
+    text_window main_window;
+    text_window_ctor_in_place(&main_window, current_buffer, (coord){ 0, title_window.size.y },
+        (coord){ current_buffer->size.x, current_buffer->size.y - title_window.size.y }
     );
+    text_window_put_string_word_wrap_partial(&main_window, 
+        "Preface\n"
+        "The artist is the creator of beautiful things.  To reveal art and conceal the artist is art"APS"s "
+        "aim.  The critic is he who can translate into another manner or a new material his impression of "
+        "beautiful things.\n"
+        "The highest as the lowest form of criticism is a mode of autobiography.  Those who find ugly "
+        "meanings in beautiful things are corrupt without being charming.  This is a fault.\n"
+        "Those who find beautiful meanings in beautiful things are the cultivated.  For these there is hope.  "
+        "They are the elect to whom beautiful things mean only beauty.\n"
+        "There is no such thing as a moral or an immoral book.  Books are well written, or badly written.  "
+        "That is all.\n"
+        "The nineteenth century dislike of realism is the rage of Caliban seeing his own face in a glass.\n"
+        "The nineteenth century dislike of romanticism is the rage of Caliban not seeing his own face in a "
+        "glass.  The moral life of man forms part of the subject-matter of the artist, but the morality of "
+        "art consists in the perfect use of an imperfect medium.  No artist desires to prove anything.  Even "
+        "things that are true can be proved.  No artist has ethical sympathies.  An ethical sympathy in an "
+        "artist is an unpardonable mannerism of style.  No artist is ever morbid.  The artist can express "
+        "everything.  Thought and language are to the artist instruments of an art.  Vice and virtue are to "
+        "the artist materials for an art.  From the point of view of form, the type of all the arts is the "
+        "art of the musician.  From the point of view of feeling, the actor"APS"s craft is the type.  All art is "
+        "at once surface and symbol.  Those who go beneath the surface do so at their peril.  Those who read "
+        "the symbol do so at their peril.  It is the spectator, and not life, that art really mirrors.  "
+        "Diversity of opinion about a work of art shows that the work is new, complex, and vital.  When "
+        "critics disagree, the artist is in accord with himself.  We can forgive a man for making a useful "
+        "thing as long as he does not admire it.  The only excuse for making a useless thing is that one "
+        "admires it intensely.\n"
+        "All art is quite useless.\n"
+        "Chapter 1\n"
+        "The studio was filled with the rich odour of roses, and when the light summer wind stirred amidst "
+        "the trees of the garden, there came through the open door the heavy scent of the lilac, or the more "
+        "delicate perfume of the pink-flowering thorn.\n"
+        "From the corner of the divan of Persian saddle-bags on which he was lying, smoking, as was his "
+        "custom, innumerable cigarettes, Lord Henry Wotton could just catch the gleam of the honey-sweet and "
+        "honey-coloured blossoms of a laburnum, whose tremulous branches seemed hardly able to bear the "
+        "burden of a beauty so flamelike as theirs; and now and then the fantastic shadows of birds in flight "
+        "flitted across the long tussore-silk curtains that were stretched in front of the huge window,"
+        "producing a kind of momentary Japanese effect, and making him think of those pallid, jade-faced "
+        "painters of Tokyo who, through the medium of an art that is necessarily immobile, seek to convey the "
+        "sense of swiftness and motion.  The sullen murmur of the bees shouldering their way through the long "
+        "unmown grass, or circling with monotonous insistence round the dusty gilt horns of the straggling "
+        "woodbine, seemed to make the stillness more oppressive.  The dim roar of London was like the bourdon "
+        "note of a distant organ.\n"
+        "In the centre of the room, clamped to an upright easel, stood the full-length portrait of a young "
+        "man of extraordinary personal beauty, and in front of it, some little distance away, was sitting the "
+        "artist himself, Basil Hallward, whose sudden disappearance some years ago caused, at the time, such "
+        "public excitement and gave rise to so many strange conjectures.\n"
+    );
+
     // Rainbow effect to prove color works.
     //text_cell* cell = text_buffer_cell(current_buffer, 0, 0);
     //for (int i = 0; i < current_buffer->size.x * current_buffer->size.y; i++, cell++) {
@@ -728,7 +763,8 @@ int main()
     //        cell->foreground = i;
     //        cell->background = ~i;
     //}
-    // Wait for high voltages to come up and then sequence gating of analog power rails
+
+    /// 800x480 TFT: Wait for high voltages to come up and then sequence gating of analog power rails
     sleep_ms(10);
     gpio_put(RESET_PIN, 1);
     sleep_ms(20);
@@ -738,15 +774,18 @@ int main()
     sleep_ms( 5 + 10);
     gpio_put(VGH_PIN, 1);
     sleep_ms(10 + 20);
+    /// end 800x480 TFT ////////////////////////////////////////////////////////
 #ifndef CORE_1_IRQs
-    scanvideo_setup(&tft_mode_480x800_60);
+    scanvideo_setup(&VIDEO_MODE);
     scanvideo_timing_enable(true);
 #endif
     multicore_launch_core1(&run_video);
+    /// 800x480 TFT: Wait for LCD to sync with data stream before turning the backlight on
     sleep_ms(200);
     pwm_set_gpio_level(PWM_PIN, 8192);
+    /// end 800x480 TFT ////////////////////////////////////////////////////////
 
-    const int loop_period = 4*1000;//1000000 / lcd_config.frame_rate;//4*1000;
+    const int loop_period = 50*1000; // 20 Hz
     absolute_time_t next_loop = make_timeout_time_us(loop_period);
     unsigned blinker = 0;
     while (1) {
@@ -755,6 +794,7 @@ int main()
         else
             gpio_put(PICO_DEFAULT_LED_PIN, 0);
         next_loop = delayed_by_us(next_loop, loop_period);
+        // Put something interesting here.
         sleep_until(next_loop);
     }
 }

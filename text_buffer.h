@@ -306,11 +306,6 @@ static inline void text_buffer_put_string(text_buffer* self, const char* str)
 }
 
 /**
- * Writes a string to the buffer with word wrap using the current font and colors and advances the cursor.
- */
-void text_buffer_put_string_word_wrap(text_buffer* self, const char* str);
-
-/**
  * Writes a character to the buffer without changing font or colors and advances the cursor.
  */
 static inline void text_buffer_overwrite_char(text_buffer* self, char ch)

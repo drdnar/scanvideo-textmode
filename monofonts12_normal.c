@@ -2693,8 +2693,8 @@ const MONO_FONT_12_SECTION_ATTRIBUTE unsigned char mono_font_12_bitmaps_normal[M
     0b00000000, 
     0b00000000, 
 }, { // #206
-    0b00111000, 
-    0b01000100, 
+    0b00010000, 
+    0b00101000, 
     0b00000000, 
     0b01111100, 
     0b00010000, 
@@ -3315,7 +3315,7 @@ const MONO_FONT_12_SECTION_ATTRIBUTE unsigned char mono_font_12_bitmaps_normal[M
     0b00011000, 
     0b00001000, 
     0b00010000, 
-    0b00100000, 
+    0b01100000, 
 }, { // #254
     0b00000000, 
     0b01000000, 
@@ -3341,7 +3341,7 @@ const MONO_FONT_12_SECTION_ATTRIBUTE unsigned char mono_font_12_bitmaps_normal[M
     0b00011000, 
     0b00001000, 
     0b00010000, 
-    0b00100000, 
+    0b01100000, 
 }, 
 }, 
 ////////////////////////////////////////////////////////////////////////////////
@@ -5942,12 +5942,12 @@ const MONO_FONT_12_SECTION_ATTRIBUTE unsigned char mono_font_12_bitmaps_normal[M
     0b01100010, 
     0b01100000, 
     0b01100000, 
-    0b01100000, 
     0b01100010, 
     0b00110110, 
     0b00011100, 
     0b00011000, 
     0b00001100, 
+    0b00111000, 
 }, { // #200
     0b00110000, 
     0b00011000, 
@@ -5962,8 +5962,8 @@ const MONO_FONT_12_SECTION_ATTRIBUTE unsigned char mono_font_12_bitmaps_normal[M
     0b00000000, 
     0b00000000, 
 }, { // #201
+    0b00001100, 
     0b00011000, 
-    0b00110000, 
     0b00000000, 
     0b01111110, 
     0b01100000, 
