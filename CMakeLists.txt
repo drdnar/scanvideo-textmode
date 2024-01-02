@@ -18,6 +18,7 @@ target_sources(scanvideotest PUBLIC
     main.c
     text_buffer.c
     text_window.c
+    text_mode.c
     monofonts12_normal.c
     cp437.c
 )
@@ -29,7 +30,17 @@ target_compile_definitions(scanvideotest PRIVATE
 )
 
 target_compile_definitions(scanvideotest PUBLIC
+    # If set to 1, text cell colors are 8-bit indexes into an array of 16-bit color values.
     TEXT_MODE_PALETTIZED_COLOR=0
+    # Set to run IRQs on core 1 along side to scan line generation code.
+    TEXT_MODE_CORE_1_IRQs=0
+    # Name of video mode to choose.
+    TEXT_VIDEO_MODE=tft_mode_480x800_60
+    # These values are used to compute the correct text buffer size.
+    SCREEN_WIDTH=800
+    SCREEN_HEIGHT=480
+    # Used to measure CPU usage with an oscilloscope.
+    TIMING_MEASURE_PIN=28
     PICO_SCANVIDEO_MAX_SCANLINE_BUFFER_WORDS=1024
     PICO_SCANVIDEO_SCANLINE_BUFFER_COUNT=4
     PICO_SCANVIDEO_COLOR_PIN_BASE=0

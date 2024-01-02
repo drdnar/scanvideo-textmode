@@ -2,6 +2,7 @@
 #include "pico.h"
 #include "pico/stdlib.h"
 #include "pico/scanvideo.h"
+#include "pico/scanvideo/scanvideo_base.h"
 #include "pico/scanvideo/composable_scanline.h"
 #include "pico/multicore.h"
 #include "hardware/clocks.h"
@@ -13,6 +14,7 @@
 
 #include "text_buffer.h"
 #include "text_window.h"
+#include "text_mode.h"
 #include "monofonts12.h"
 #include "cp437.h"
 
@@ -28,16 +30,11 @@
 #define FULL_RES
 // Use CP437 font instead
 //#define USE_CP437
-//#define CORE_1_IRQs
 
-#define HEIGHT 480
-#define WIDTH 800
-#define VIDEO_MODE tft_mode_480x800_60
-/* If you change the screen resolution, you may want to override these because the limits chosen
-below are calibrated specifically for my 800x480 TFT.
-#define TEXT_ROWS 40
-#define TEXT_COLS 100
-*/
+// If you turn off FULL_RES and change the screen resolution, you may want to override these
+// because the limits chosen below are calibrated specifically for my 800x480 TFT.
+// #define TEXT_ROWS 40
+// #define TEXT_COLS 100
 
 // Adjust text buffer size to match screen size and what can be rendered fast enough.
 #ifdef USE_CP437
@@ -46,16 +43,16 @@ below are calibrated specifically for my 800x480 TFT.
     // gets cut off.
     #ifndef TEXT_ROWS
         // 35
-        #define TEXT_ROWS ((HEIGHT + CP437_FONT_HEIGHT - 1) / CP437_FONT_HEIGHT)
+        #define TEXT_ROWS ((SCREEN_HEIGHT + CP437_FONT_HEIGHT - 1) / CP437_FONT_HEIGHT)
     #endif
     #ifndef TEXT_COLS
         #ifdef FULL_RES
             // 88
-            #define TEXT_COLS ((WIDTH + CP437_FONT_WIDTH - 1) / CP437_FONT_WIDTH)
+            #define TEXT_COLS ((SCREEN_WIDTH + CP437_FONT_WIDTH - 1) / CP437_FONT_WIDTH)
         #else /* not FULL_RES */
             #if !TEXT_MODE_PALETTIZED_COLOR
                 // 88
-                #define TEXT_COLS ((WIDTH + CP437_FONT_WIDTH - 1) / CP437_FONT_WIDTH)
+                #define TEXT_COLS ((SCREEN_WIDTH + CP437_FONT_WIDTH - 1) / CP437_FONT_WIDTH)
             #else /* TEXT_MODE_PALETTIZED_COLOR */
                 #define TEXT_COLS 79
             #endif /* TEXT_MODE_PALETTIZED_COLOR */
@@ -64,12 +61,12 @@ below are calibrated specifically for my 800x480 TFT.
 #else /* not USE_CP437 */
     #ifndef TEXT_ROWS
         // 40
-        #define TEXT_ROWS ((HEIGHT + MONO_FONT_HEIGHT - 1) / MONO_FONT_HEIGHT)
+        #define TEXT_ROWS ((SCREEN_HEIGHT + MONO_FONT_HEIGHT - 1) / MONO_FONT_HEIGHT)
     #endif
     #ifndef TEXT_COLS
         #ifdef FULL_RES
             // 100
-            #define TEXT_COLS ((WIDTH + MONO_FONT_WIDTH - 1) / MONO_FONT_WIDTH)
+            #define TEXT_COLS ((SCREEN_WIDTH + MONO_FONT_WIDTH - 1) / MONO_FONT_WIDTH)
         #else /* not FULL_RES */
             #if !TEXT_MODE_PALETTIZED_COLOR
                 #define TEXT_COLS 96
@@ -79,20 +76,6 @@ below are calibrated specifically for my 800x480 TFT.
         #endif /* FULL_RES */
     #endif
 #endif /* USE_CP437 */
-
-#if TEXT_MODE_PALETTIZED_COLOR
-/** Default palette for rendering. */
-uint16_t main_palette[] = {
-    // Since I wired up my TFT as 6 bits per pixel, just map each entry to its index.
-    // You can override this with your own palette here.
-    0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F,
-    0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F,
-    0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28, 0x29, 0x2A, 0x2B, 0x2C, 0x2D, 0x2E, 0x2F,
-    0x30, 0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37, 0x38, 0x39, 0x3A, 0x3B, 0x3C, 0x3D, 0x3E, 0x3F,
-};
-/** Current palette for rendering. */
-uint16_t* current_palette = main_palette;
-#endif
 
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -115,8 +98,6 @@ uint16_t* current_palette = main_palette;
 #define DITHERING_PIN 18
 /** LCD backlight control pin */
 #define PWM_PIN 27
-/** Used to measure CPU usage with an oscilloscope. */
-#define TIMING_MEASURE_PIN 28
 
 enum COLORS6BPP
 {   // For this palette, wire odd bits of each channel together and same for even.
@@ -143,8 +124,8 @@ enum COLORS6BPP
 const scanvideo_timing_t tft_timing_480x800_60_default = {
     .clock_freq = 30000000,
 
-    .h_active = WIDTH,
-    .v_active = HEIGHT,
+    .h_active = SCREEN_WIDTH,
+    .v_active = SCREEN_HEIGHT,
 
     .h_front_porch = 155,
     .h_pulse = 32,
@@ -161,12 +142,12 @@ const scanvideo_timing_t tft_timing_480x800_60_default = {
 
     .enable_den = 0
 };
-/** Custom mode for my TFT LCD. */
+/** Custom mode for 800x480 TFT LCD. */
 const scanvideo_mode_t tft_mode_480x800_60 = {
     .default_timing = &tft_timing_480x800_60_default,
     .pio_program = &video_24mhz_composable,
-    .width = WIDTH,
-    .height = HEIGHT,
+    .width = SCREEN_WIDTH,
+    .height = SCREEN_HEIGHT,
     .xscale = 1,
     .yscale = 1,
     .yscale_denominator = 1
@@ -201,439 +182,20 @@ const scanvideo_mode_t tft_mode_480x800_60 = {
 /////// GLOBAL VARIABLES ///////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////
 
-/** Currently active font. */
-#ifndef USE_CP437
-const text_mode_font* current_font = &mono_font_12_normal;
-#else
-const text_mode_font* current_font = &cp437;
+#if TEXT_MODE_PALETTIZED_COLOR
+/** Default palette for rendering. */
+uint16_t main_palette[] = {
+    // Since I wired up my TFT as 6 bits per pixel, just map each entry to its index.
+    // You can override this with your own palette here.
+    0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F,
+    0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F,
+    0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28, 0x29, 0x2A, 0x2B, 0x2C, 0x2D, 0x2E, 0x2F,
+    0x30, 0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37, 0x38, 0x39, 0x3A, 0x3B, 0x3C, 0x3D, 0x3E, 0x3F,
+};
 #endif
 
 /** Main text buffer for rendering. */
 text_buffer main_buffer = STATIC_TEXT_BUFFER(TEXT_COLS, TEXT_ROWS, BRIGHT_WHITE, BLACK, ' ', 0);
-/** Current text screen to render from and write to. */
-text_buffer* current_buffer = &main_buffer;
-
-
-////////////////////////////////////////////////////////////////////////////////
-/////// RENDER ROUTINES ////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////////////////////////
-
-#define CORE_1_FUNC(FUNC_NAME) __scratch_y(#FUNC_NAME) FUNC_NAME
-
-static inline uint16_t* CORE_1_FUNC(generate_line_byte_font)(uint16_t* write, unsigned scanline, text_buffer* screen, const text_mode_font* font)
-{
-    divmod_result_t r = hw_divider_divmod_u32(scanline, font->scan_lines);
-    uint32_t char_row = to_remainder_u32(r);
-    uint32_t ignored1, ignored2, ignored3;
-    register int rjump_delta asm("r8") = 6 * (8 - font->scan_pixels) + 1; // +1 for Thumb mode
-    register int rwrite_inc asm("r9") = font->scan_pixels * 2;
-#if TEXT_MODE_PALETTIZED_COLOR
-    register uint16_t* rend asm("r10") = write + font->scan_pixels * screen->size.x;
-#endif
-    register uint32_t row asm("r5") = to_quotient_u32(r);
-    register uint16_t* rwrite asm("r0") = write;
-    register uint32_t rbytes asm("r1") = font->bytes_per_glyph;
-    register text_cell* rread asm("r2") = text_buffer_cell(screen, 0, row);
-    register uint8_t* rfont asm("r3") = (uint8_t*)font->data + char_row;
-#if !TEXT_MODE_PALETTIZED_COLOR
-    register uint32_t rcols asm("r4") = screen->size.x;
-    assert(sizeof(text_cell) == 6);
-#else
-    register uint16_t* rpalette asm("r4") = current_palette;
-    assert(sizeof(text_cell) == 4);
-#endif
-    asm volatile(
-        // This ends up being a bit over 4-5 cycles per pixel depending on how often it changes
-        // between foreground and background color.  Since Latin scripts are mostly white space,
-        // most time will be spent in the reset bit path, where there are no branches to flush
-        // the (short two-stage) pipeline, so it'll average closer to 4 cycles per pixel.
-        // But some semigraphical glyphs can alternate every pixel, so you still should plan for
-        // the worst-case 5 cycles.
-        // Register allocations:
-        // r0: write pointer
-        // r1: bytes per glyph
-        // r2: read pointer
-        // r3: font pointer
-        // r4: column counter or palette pointer
-        // r5: bitmap
-        // r6: foreground color
-        // r7: background color
-        // r8: loop entry address
-        // r9: write increment
-        // r10: write end address in palette mode
-#if !TEXT_MODE_PALETTIZED_COLOR
-        // Including loop overhead, it averages to about 7 cycles per pixel (worst-case).
-#else
-        // Including loop overhead, it averages to about 8 cycles per pixel (worst-case).
-#endif
-        "// Cache loop start address\n"
-        "    adr     r6, loop_entry%=\n"
-        "    add     %[loopstart], r6\n"
-        "// Fetch character and colors\n"
-        "    ldrh    %[bitmap], [%[read], #0]\n"
-        "    // RP2040's CPU cores have the single-cycle multiplier option so shifting isn't any faster\n"
-        "    // and is really only useful if you need to save a register.\n"
-        "    mul     %[bitmap], %[glyphsize], %[bitmap]\n"
-        "    ldrb    %[bitmap], [%[bitmap], %[font]]\n"
-#if !TEXT_MODE_PALETTIZED_COLOR
-        "    ldrh    r6, [%[read], #2]\n" // offset of text_cell.foreground
-        "    ldrh    r7, [%[read], #4]\n" // offset of text_cell.background
-        "    add     %[read], %[read], #6\n" // sizeof(text_cell)
-#else
-        "    ldrb    r6, [%[read], #2]\n" // offset of text_cell.foreground
-        "    ldrb    r7, [%[read], #3]\n" // offset of text_cell.background
-        "    add     %[read], %[read], #4\n" // sizeof(text_cell)
-        "    lsl     r6, r6, #1\n"
-        "    ldrh    r6, [%[palette], r6]\n"
-        "    lsl     r7, r7, #1\n"
-        "    ldrh    r7, [%[palette], r7]\n"
-#endif
-        "// Unrolled loop\n"
-        "    bx      %[loopstart]\n"
-        ".balign 4 // ADR requires 32-bit alignment\n"
-        "loop_entry%=:"
-#define resetbit(bit) "    lsr     %[bitmap], %[bitmap], #1\n" \
-"    bcs     set" #bit "%=\n" \
-"reset" #bit "%=:\n" \
-"    strh    r7, [%[write], #(" #bit " * 2)]\n"
-        resetbit(7)
-        resetbit(6)
-        resetbit(5)
-        resetbit(4)
-        resetbit(3)
-        resetbit(2)
-        resetbit(1)
-        resetbit(0)
-        "    add     %[write], %[writeinc]\n"
-#if !TEXT_MODE_PALETTIZED_COLOR
-        "    sub     %[cols], #1\n"
-#else
-        "    cmp     %[end], %[write]\n"
-#endif
-        "    beq     done%=\n"
-        "// Fetch character and colors\n"
-        "    ldrh    %[bitmap], [%[read], #0]\n"
-        "    mul     %[bitmap], %[glyphsize], %[bitmap]\n"
-        "    ldrb    %[bitmap], [%[bitmap], %[font]]\n"
-#if !TEXT_MODE_PALETTIZED_COLOR
-        "    ldrh    r6, [%[read], #2]\n" // offset of text_cell.foreground
-        "    ldrh    r7, [%[read], #4]\n" // offset of text_cell.background
-        "    add     %[read], %[read], #6\n" // sizeof(text_cell)
-#else
-        "    ldrb    r6, [%[read], #2]\n" // offset of text_cell.foreground
-        "    ldrb    r7, [%[read], #3]\n" // offset of text_cell.background
-        "    add     %[read], %[read], #4\n" // sizeof(text_cell)
-        "    lsl     r6, r6, #1\n"
-        "    ldrh    r6, [%[palette], r6]\n"
-        "    lsl     r7, r7, #1\n"
-        "    ldrh    r7, [%[palette], r7]\n"
-#endif
-        "    bx      %[loopstart]\n"
-        // First iteration here is slightly different because there's no preshifting to be done.
-#define sethighbit(bit) "set" #bit "%=:\n" \
-"    strh    r6, [%[write], #(" #bit " * 2)]\n"
-        sethighbit(7)
-#define setbit(bit) "    lsr     %[bitmap], %[bitmap], #1\n" \
-"    bcc     reset" #bit "%=\n" \
-"set" #bit "%=:\n" \
-"    strh    r6, [%[write], #(" #bit " * 2)]\n"
-        setbit(6)
-        setbit(5)
-        setbit(4)
-        setbit(3)
-        setbit(2)
-        setbit(1)
-        setbit(0)
-        "    add     %[write], %[writeinc]\n"
-#if !TEXT_MODE_PALETTIZED_COLOR
-        "    sub     %[cols], #1\n"
-#else
-        "    cmp     %[end], %[write]\n"
-#endif
-        "    beq     done%=\n"
-        "// Fetch character and colors\n"
-        "    ldrh    %[bitmap], [%[read], #0]\n"
-        "    mul     %[bitmap], %[glyphsize], %[bitmap]\n"
-        "    ldrb    %[bitmap], [%[bitmap], %[font]]\n"
-#if !TEXT_MODE_PALETTIZED_COLOR
-        "    ldrh    r6, [%[read], #2]\n" // offset of text_cell.foreground
-        "    ldrh    r7, [%[read], #4]\n" // offset of text_cell.background
-        "    add     %[read], %[read], #6\n" // sizeof(text_cell)
-#else
-        "    ldrb    r6, [%[read], #2]\n" // offset of text_cell.foreground
-        "    ldrb    r7, [%[read], #3]\n" // offset of text_cell.background
-        "    add     %[read], %[read], #4\n" // sizeof(text_cell)
-        "    lsl     r6, r6, #1\n"
-        "    ldrh    r6, [%[palette], r6]\n"
-        "    lsl     r7, r7, #1\n"
-        "    ldrh    r7, [%[palette], r7]\n"
-#endif
-        "    bx      %[loopstart]\n"
-        "done%=:"
-     :  [read]     "=r" (ignored1),
-        [write]    "=r" (write),
-#if !TEXT_MODE_PALETTIZED_COLOR
-        [cols]     "=r" (ignored2),
-#endif
-        [loopstart]"=r" (rjump_delta),
-        [bitmap]   "=r" (ignored3)
-     : "[write]"        (rwrite),
-        [glyphsize]"r"  (rbytes),
-       "[read]"         (rread),
-        [font]     "r"  (rfont),
-       "[loopstart]""r" (rjump_delta),
-        [writeinc] "r"  (rwrite_inc),
-       "[bitmap]"  "r"  (row),
-#if !TEXT_MODE_PALETTIZED_COLOR
-       "[cols]"    "r"  (rcols)
-#else
-        [palette]  "r"  (rpalette),
-        [end]      "r"  (rend)
-#endif
-     : "cc", "memory",
-       "r6", "r7"
-    );
-#undef resetbit
-#undef sethighbit
-#undef setbit
-    return write;
-}
-
-
-static inline uint16_t* CORE_1_FUNC(generate_line_short_font)(uint16_t* write, unsigned scanline, text_buffer* screen, const text_mode_font* font)
-{
-    divmod_result_t r = hw_divider_divmod_u32(scanline, font->scan_lines);
-    uint32_t char_row = to_remainder_u32(r);
-    uint32_t ignored1, ignored2, ignored3;
-    register int rjump_delta asm("r8") = 6 * (16 - font->scan_pixels) + 1; // +1 for Thumb mode
-    register int rwrite_inc asm("r9") = font->scan_pixels * 2;
-#if TEXT_MODE_PALETTIZED_COLOR
-    register uint16_t* rend asm("r10") = write + font->scan_pixels * screen->size.x;
-#endif
-    register uint32_t row asm("r5") = to_quotient_u32(r);
-    register uint16_t* rwrite asm("r0") = write;
-    register uint32_t rbytes asm("r1") = font->bytes_per_glyph;
-    register text_cell* rread asm("r2") = text_buffer_cell(screen, 0, row);
-    register uint16_t* rfont asm("r3") = (uint16_t*)font->data + char_row;
-#if !TEXT_MODE_PALETTIZED_COLOR
-    register uint32_t rcols asm("r4") = screen->size.x;
-    assert(sizeof(text_cell) == 6);
-#else
-    register uint16_t* rpalette asm("r4") = current_palette;
-    assert(sizeof(text_cell) == 4);
-#endif
-    asm volatile(
-        // This ends up being a bit over 4-5 cycles per pixel depending on how often it changes
-        // between foreground and background color.  Since Latin scripts are mostly white space,
-        // most time will be spent in the reset bit path, where there are no branches to flush
-        // the (short two-stage) pipeline, so it'll average closer to 4 cycles per pixel.
-        // But some semigraphical glyphs can alternate every pixel, so you still should plan for
-        // the worst-case 5 cycles.
-        // Register allocations:
-        // r0: write pointer
-        // r1: bytes per glyph
-        // r2: read pointer
-        // r3: font pointer
-        // r4: column counter or palette pointer
-        // r5: bitmap
-        // r6: foreground color
-        // r7: background color
-        // r8: loop entry address
-        // r9: write increment
-        // r10: write end address in palette mode
-#if !TEXT_MODE_PALETTIZED_COLOR
-        // Including loop overhead, it averages to 6-7 cycles per pixel (worst-case) depending on the glyph width.
-        // (The wider the glyph, the less impact the loop overhead has.)
-#else
-        // Including loop overhead, it averages to 7-8 cycles per pixel (worst-case) depending on the glyph width.
-        // (The wider the glyph, the less impact the loop overhead has.)
-#endif
-        "// Cache loop start address\n"
-        "    adr     r6, loop_entry%=\n"
-        "    add     %[loopstart], r6\n"
-        "// Fetch character and colors\n"
-        "    ldrh    %[bitmap], [%[read], #0]\n"
-        "    // RP2040's CPU cores have the single-cycle multiplier option so shifting isn't any faster\n"
-        "    // and is really only useful if you need to save a register.\n"
-        "    mul     %[bitmap], %[glyphsize], %[bitmap]\n"
-        "    ldrh    %[bitmap], [%[bitmap], %[font]]\n"
-#if !TEXT_MODE_PALETTIZED_COLOR
-        "    ldrh    r6, [%[read], #2]\n" // offset of text_cell.foreground
-        "    ldrh    r7, [%[read], #4]\n" // offset of text_cell.background
-        "    add     %[read], %[read], #6\n" // sizeof(text_cell)
-#else
-        "    ldrb    r6, [%[read], #2]\n" // offset of text_cell.foreground
-        "    ldrb    r7, [%[read], #3]\n" // offset of text_cell.background
-        "    add     %[read], %[read], #4\n" // sizeof(text_cell)
-        "    lsl     r6, r6, #1\n"
-        "    ldrh    r6, [%[palette], r6]\n"
-        "    lsl     r7, r7, #1\n"
-        "    ldrh    r7, [%[palette], r7]\n"
-#endif
-        "// Unrolled loop\n"
-        "    bx      %[loopstart]\n"
-        ".balign 4 // ADR requires 32-bit alignment\n"
-        "loop_entry%=:"
-#define resetbit(bit) "    lsr     %[bitmap], %[bitmap], #1\n" \
-"    bcs     set" #bit "%=\n" \
-"reset" #bit "%=:\n" \
-"    strh    r7, [%[write], #(" #bit " * 2)]\n"
-        resetbit(15)
-        resetbit(14)
-        resetbit(13)
-        resetbit(12)
-        resetbit(11)
-        resetbit(10)
-        resetbit(9)
-        resetbit(8)
-        resetbit(7)
-        resetbit(6)
-        resetbit(5)
-        resetbit(4)
-        resetbit(3)
-        resetbit(2)
-        resetbit(1)
-        resetbit(0)
-        "    add     %[write], %[writeinc]\n"
-#if !TEXT_MODE_PALETTIZED_COLOR
-        "    sub     %[cols], #1\n"
-#else
-        "    cmp     %[end], %[write]\n"
-#endif
-        "    beq     done%=\n"
-        "// Fetch character and colors\n"
-        "    ldrh    %[bitmap], [%[read], #0]\n"
-        "    mul     %[bitmap], %[glyphsize], %[bitmap]\n"
-        "    ldrh    %[bitmap], [%[bitmap], %[font]]\n"
-#if !TEXT_MODE_PALETTIZED_COLOR
-        "    ldrh    r6, [%[read], #2]\n" // offset of text_cell.foreground
-        "    ldrh    r7, [%[read], #4]\n" // offset of text_cell.background
-        "    add     %[read], %[read], #6\n" // sizeof(text_cell)
-#else
-        "    ldrb    r6, [%[read], #2]\n" // offset of text_cell.foreground
-        "    ldrb    r7, [%[read], #3]\n" // offset of text_cell.background
-        "    add     %[read], %[read], #4\n" // sizeof(text_cell)
-        "    lsl     r6, r6, #1\n"
-        "    ldrh    r6, [%[palette], r6]\n"
-        "    lsl     r7, r7, #1\n"
-        "    ldrh    r7, [%[palette], r7]\n"
-#endif
-        "    bx      %[loopstart]\n"
-        // First iteration here is slightly different because there's no preshifting to be done.
-#define sethighbit(bit) "set" #bit "%=:\n" \
-"    strh    r6, [%[write], #(" #bit " * 2)]\n"
-        sethighbit(15)
-#define setbit(bit) "    lsr     %[bitmap], %[bitmap], #1\n" \
-"    bcc     reset" #bit "%=\n" \
-"set" #bit "%=:\n" \
-"    strh    r6, [%[write], #(" #bit " * 2)]\n"
-        setbit(14)
-        setbit(13)
-        setbit(12)
-        setbit(11)
-        setbit(10)
-        setbit(9)
-        setbit(8)
-        setbit(7)
-        setbit(6)
-        setbit(5)
-        setbit(4)
-        setbit(3)
-        setbit(2)
-        setbit(1)
-        setbit(0)
-        "    add     %[write], %[writeinc]\n"
-#if !TEXT_MODE_PALETTIZED_COLOR
-        "    sub     %[cols], #1\n"
-#else
-        "    cmp     %[end], %[write]\n"
-#endif
-        "    beq     done%=\n"
-        "// Fetch character and colors\n"
-        "    ldrh    %[bitmap], [%[read], #0]\n"
-        "    mul     %[bitmap], %[glyphsize], %[bitmap]\n"
-        "    ldrh    %[bitmap], [%[bitmap], %[font]]\n"
-#if !TEXT_MODE_PALETTIZED_COLOR
-        "    ldrh    r6, [%[read], #2]\n" // offset of text_cell.foreground
-        "    ldrh    r7, [%[read], #4]\n" // offset of text_cell.background
-        "    add     %[read], %[read], #6\n" // sizeof(text_cell)
-#else
-        "    ldrb    r6, [%[read], #2]\n" // offset of text_cell.foreground
-        "    ldrb    r7, [%[read], #3]\n" // offset of text_cell.background
-        "    add     %[read], %[read], #4\n" // sizeof(text_cell)
-        "    lsl     r6, r6, #1\n"
-        "    ldrh    r6, [%[palette], r6]\n"
-        "    lsl     r7, r7, #1\n"
-        "    ldrh    r7, [%[palette], r7]\n"
-#endif
-        "    bx      %[loopstart]\n"
-        "done%=:"
-    :  [read]     "=r" (ignored1),
-       [write]    "=r" (write),
-#if !TEXT_MODE_PALETTIZED_COLOR
-       [cols]     "=r" (ignored2),
-#endif
-       [loopstart]"=r" (rjump_delta),
-       [bitmap]   "=r" (ignored3)
-    : "[write]"        (write),
-       [glyphsize]"r"  (rbytes),
-      "[read]"         (rread),
-       [font]     "r"  (rfont),
-      "[loopstart]""r" (rjump_delta),
-       [writeinc] "r"  (rwrite_inc),
-      "[bitmap]"  "r"  (row),
-#if !TEXT_MODE_PALETTIZED_COLOR
-      "[cols]"    "r"  (rcols)
-#else
-       [palette]  "r"  (rpalette),
-       [end]      "r"  (rend)
-#endif
-    : "cc", "memory",
-      "r6", "r7"
-    );
-#undef resetbit
-#undef sethighbit
-#undef setbit
-    return write;
-}
-
-
-void CORE_1_FUNC(run_video)()
-{
-#ifdef CORE_1_IRQs
-    scanvideo_setup(&VIDEO_MODE);
-    scanvideo_timing_enable(true);
-#endif
-    while (true) {
-        struct scanvideo_scanline_buffer* buffer = scanvideo_begin_scanline_generation(true);
-        gpio_put(TIMING_MEASURE_PIN, 1);
-        uint16_t* write = (uint16_t*)buffer->data;
-        *write++ = COMPOSABLE_RAW_RUN;
-        write++;
-        const text_mode_font* font = current_font;
-        text_buffer* screen = current_buffer;
-        if (font->bytes_per_scan == 1)
-            write = generate_line_byte_font(write, scanvideo_scanline_number(buffer->scanline_id), screen, font);
-        else if (font->bytes_per_scan == 2)
-            write = generate_line_short_font(write, scanvideo_scanline_number(buffer->scanline_id), screen, font);
-        else
-            assert(0);
-        uint16_t* length = (uint16_t*)buffer->data + 1;
-        length[0] = length[1];
-        size_t count = write - length - 1;
-        length[1] = count;
-        if (count & 1) {
-            *write++ = COMPOSABLE_EOL_ALIGN;
-        } else {
-            *write++ = COMPOSABLE_EOL_SKIP_ALIGN;
-            *write++ = 0;
-        }
-        buffer->data_used = (uint32_t*)write - buffer->data;
-        buffer->status = SCANLINE_OK;
-        gpio_put(TIMING_MEASURE_PIN, 0);
-        scanvideo_end_scanline_generation(buffer);
-    }
-}
 
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -645,7 +207,9 @@ void CORE_1_FUNC(run_video)()
 
 int main()
 {
-    // Adjust CPU speed to be as fast as needed for selected options
+    // Adjust CPU speed to be as fast as needed for selected options.
+    // These are calibrated for an 800x480 60 Hz TFT LCD; at lower resolutions (e.g. 640x480 VGA),
+    // you may be able to get away with a less aggressive overclock, or even none at all.
 #ifdef FULL_RES
     #if !TEXT_MODE_PALETTIZED_COLOR
         set_sys_clock_khz(180000, true);
@@ -687,16 +251,25 @@ int main()
     pwm_set_enabled(slice, true);
     pwm_set_gpio_level(PWM_PIN, 0);
     /// end 800x480 TFT ////////////////////////////////////////////////////////
-    
+    text_mode_current_buffer = &main_buffer;
+#ifndef USE_CP437
+    text_mode_current_font = &mono_font_12_normal;
+#else
+    text_mode_current_font = &cp437;
+#endif
+#if TEXT_MODE_PALETTIZED_COLOR
+    text_mode_current_palette = main_palette;
+#endif
+
     printf("\nHW init complete. ");
 
     // Display test text
-    current_buffer->colors.foreground = BLACK;
-    current_buffer->colors.background = BRIGHT_WHITE;
+    main_buffer.colors.foreground = BLACK;
+    main_buffer.colors.background = BRIGHT_WHITE;
     const char* title = "The Picture of Dorian Gray";
     text_window title_window;
-    text_window_ctor_in_place(&title_window, current_buffer, (coord){ 0, 0 },
-        (coord){ current_buffer->size.x, 2 }
+    text_window_ctor_in_place(&title_window, &main_buffer, (coord){ 0, 0 },
+        (coord){ main_buffer.size.x, 2 }
     );
 #ifndef USE_CP437
     title_window.font = MONO_FONT_BOLD;
@@ -705,8 +278,8 @@ int main()
     text_window_newline_no_scroll(&title_window);
     text_window_put_string_centered_line(&title_window, "Oscar Wilde");
     text_window main_window;
-    text_window_ctor_in_place(&main_window, current_buffer, (coord){ 0, title_window.size.y },
-        (coord){ current_buffer->size.x, current_buffer->size.y - title_window.size.y }
+    text_window_ctor_in_place(&main_window, &main_buffer, (coord){ 0, title_window.size.y },
+        (coord){ main_buffer.size.x, main_buffer.size.y - title_window.size.y }
     );
     text_window_put_string_word_wrap_partial(&main_window, 
         "Preface\n"
@@ -775,11 +348,11 @@ int main()
     gpio_put(VGH_PIN, 1);
     sleep_ms(10 + 20);
     /// end 800x480 TFT ////////////////////////////////////////////////////////
-#ifndef CORE_1_IRQs
-    scanvideo_setup(&VIDEO_MODE);
+#if !TEXT_MODE_CORE_1_IRQs
+    scanvideo_setup(&TEXT_VIDEO_MODE);
     scanvideo_timing_enable(true);
 #endif
-    multicore_launch_core1(&run_video);
+    multicore_launch_core1(&text_mode_render_loop);
     /// 800x480 TFT: Wait for LCD to sync with data stream before turning the backlight on
     sleep_ms(200);
     pwm_set_gpio_level(PWM_PIN, 8192);
