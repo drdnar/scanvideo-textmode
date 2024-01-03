@@ -243,7 +243,9 @@ int main()
     gpio_init_out(AVDD_PIN, 0);
     gpio_init_out(VGH_PIN, 0);
     gpio_init_out(DITHERING_PIN, 1);
+#ifdef TIMING_MEASURE_PIN
     gpio_init_out(TIMING_MEASURE_PIN, 0);
+#endif
     gpio_set_function(PWM_PIN, GPIO_FUNC_PWM);
     unsigned slice = pwm_gpio_to_slice_num(PWM_PIN);
     pwm_set_wrap(slice, 16384);

@@ -395,7 +395,9 @@ void CORE_1_FUNC(text_mode_render_loop)()
 #endif
     while (true) {
         struct scanvideo_scanline_buffer* buffer = scanvideo_begin_scanline_generation(true);
+#ifdef TIMING_MEASURE_PIN
         gpio_put(TIMING_MEASURE_PIN, 1);
+#endif
         uint16_t* write = (uint16_t*)buffer->data;
         *write++ = COMPOSABLE_RAW_RUN;
         write++;
@@ -419,7 +421,9 @@ void CORE_1_FUNC(text_mode_render_loop)()
         }
         buffer->data_used = (uint32_t*)write - buffer->data;
         buffer->status = SCANLINE_OK;
+#ifdef TIMING_MEASURE_PIN
         gpio_put(TIMING_MEASURE_PIN, 0);
+#endif
         scanvideo_end_scanline_generation(buffer);
     }
 }
