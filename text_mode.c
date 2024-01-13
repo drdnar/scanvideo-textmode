@@ -8,22 +8,89 @@ const text_mode_font* volatile text_mode_current_font;
 uint16_t* volatile text_mode_current_palette;
 #endif
 
+
+/**
+ * Declares a function to be placed in the scratch Y RAM bank, which is usually dedicated to core 1's
+ * stack.
+ */
 #define CORE_1_FUNC(FUNC_NAME) __scratch_y(#FUNC_NAME) FUNC_NAME
 
+
 #define SHIFT_AMOUNT ((TEXT_MODE_MAX_FONT_WIDTH) <= 15 ? 17 : 17 - ((TEXT_MODE_MAX_FONT_WIDTH) - 15))
+
 
 #if TEXT_MODE_MAX_FONT_WIDTH > 30
 #error "TEXT_MODE_MAX_FONT_WIDTH must be less than 31."
 #endif
 
-static inline uint16_t* CORE_1_FUNC(generate_line_interp)(uint16_t* write, unsigned scanline, text_buffer* screen, const text_mode_font* font)
+
+void text_mode_setup_interp(void)
+{
+    interp_claim_lane_mask(interp1, 3);
+    interp_config lane0 = interp_default_config();
+    interp_config_set_shift(&lane0, 0);
+    interp_config_set_mask(&lane0, SHIFT_AMOUNT, SHIFT_AMOUNT);
+    interp_config_set_clamp(&lane0, true);
+    interp_config_set_cross_result(&lane0, true);
+    interp_set_config(interp1, 0, &lane0);
+    interp_config lane1 = interp_default_config();
+    interp_config_set_shift(&lane1, 1);
+    interp_config_set_mask(&lane1, SHIFT_AMOUNT, 31);
+    interp_set_config(interp1, 1, &lane1);
+}
+
+
+void text_mode_release_interp(void)
+{
+        interp_unclaim_lane_mask(interp1, 3);
+}
+
+
+void CORE_1_FUNC(text_mode_render_loop)()
+{
+#if TEXT_MODE_CORE_1_IRQs
+    scanvideo_setup(&TEXT_VIDEO_MODE);
+    scanvideo_timing_enable(true);
+#endif
+    text_mode_setup_interp();
+    while (true) {
+        struct scanvideo_scanline_buffer* buffer = scanvideo_begin_scanline_generation(true);
+#ifdef TIMING_MEASURE_PIN
+        gpio_put(TIMING_MEASURE_PIN, 1);
+#endif
+        uint16_t* write = (uint16_t*)buffer->data;
+        *write++ = COMPOSABLE_RAW_RUN;
+        write++;
+        const text_mode_font* font = text_mode_current_font;
+        text_buffer* screen = text_mode_current_buffer;
+        write = text_mode_generate_line(write, scanvideo_scanline_number(buffer->scanline_id), screen, font);
+        uint16_t* length = (uint16_t*)buffer->data + 1;
+        length[0] = length[1];
+        size_t count = write - length - 1;
+        length[1] = count;
+        if (count & 1) {
+            *write++ = COMPOSABLE_EOL_ALIGN;
+        } else {
+            *write++ = COMPOSABLE_EOL_SKIP_ALIGN;
+            *write++ = 0;
+        }
+        buffer->data_used = (uint32_t*)write - buffer->data;
+        buffer->status = SCANLINE_OK;
+#ifdef TIMING_MEASURE_PIN
+        gpio_put(TIMING_MEASURE_PIN, 0);
+#endif
+        scanvideo_end_scanline_generation(buffer);
+    }
+}
+
+
+uint16_t* CORE_1_FUNC(text_mode_generate_line)(uint16_t* write, unsigned scanline, text_buffer* screen, const text_mode_font* font)
 {
     divmod_result_t r = hw_divider_divmod_u32(scanline, font->scan_lines);
     uint32_t char_row = to_remainder_u32(r);
     register int rjump_delta asm("r8") = 4 * (TEXT_MODE_MAX_FONT_WIDTH - font->scan_pixels) + 1; // +1 for Thumb mode
     register int rwrite_inc asm("r9") = font->scan_pixels * 2;
     register unsigned int embiggenationator asm("r10") = 0x1 << (SHIFT_AMOUNT - 1);
-    register uint16_t* rwrite asm("r0") = write;
     register uint32_t rbytes asm("r1") = font->bytes_per_glyph;
     register text_cell* rread asm("r2") = text_buffer_cell(screen, 0, to_quotient_u32(r));
     register TEXT_MODE_FONT_DATA_TYPE* rfont asm("r3") = (TEXT_MODE_FONT_DATA_TYPE*)font->data + char_row;
@@ -256,7 +323,7 @@ static inline uint16_t* CORE_1_FUNC(generate_line_interp)(uint16_t* write, unsig
         [write]    "=r" (write),
         [cols]     "=r" (rcols),
         [loopstart]"=r" (rjump_delta)
-     : "[write]"        (rwrite),
+     : "[write]"        (write),
         [glyphsize]"r"  (rbytes),
        "[read]"         (rread),
         [font]     "r"  (rfont),
@@ -274,64 +341,4 @@ static inline uint16_t* CORE_1_FUNC(generate_line_interp)(uint16_t* write, unsig
 #undef sethighbit
 #undef setbit
     return write;
-}
-
-
-void text_mode_setup_interp(void)
-{
-    interp_claim_lane_mask(interp1, 3);
-    interp_config lane0 = interp_default_config();
-    interp_config_set_shift(&lane0, 0);
-    interp_config_set_mask(&lane0, SHIFT_AMOUNT, SHIFT_AMOUNT);
-    interp_config_set_clamp(&lane0, true);
-    interp_config_set_cross_result(&lane0, true);
-    interp_set_config(interp1, 0, &lane0);
-    interp_config lane1 = interp_default_config();
-    interp_config_set_shift(&lane1, 1);
-    interp_config_set_mask(&lane1, SHIFT_AMOUNT, 31);
-    interp_set_config(interp1, 1, &lane1);
-}
-
-
-void text_mode_release_interp(void)
-{
-        interp_unclaim_lane_mask(interp1, 3);
-}
-
-
-void CORE_1_FUNC(text_mode_render_loop)()
-{
-#if TEXT_MODE_CORE_1_IRQs
-    scanvideo_setup(&TEXT_VIDEO_MODE);
-    scanvideo_timing_enable(true);
-#endif
-    text_mode_setup_interp();
-    while (true) {
-        struct scanvideo_scanline_buffer* buffer = scanvideo_begin_scanline_generation(true);
-#ifdef TIMING_MEASURE_PIN
-        gpio_put(TIMING_MEASURE_PIN, 1);
-#endif
-        uint16_t* write = (uint16_t*)buffer->data;
-        *write++ = COMPOSABLE_RAW_RUN;
-        write++;
-        const text_mode_font* font = text_mode_current_font;
-        text_buffer* screen = text_mode_current_buffer;
-        write = generate_line_interp(write, scanvideo_scanline_number(buffer->scanline_id), screen, font);
-        uint16_t* length = (uint16_t*)buffer->data + 1;
-        length[0] = length[1];
-        size_t count = write - length - 1;
-        length[1] = count;
-        if (count & 1) {
-            *write++ = COMPOSABLE_EOL_ALIGN;
-        } else {
-            *write++ = COMPOSABLE_EOL_SKIP_ALIGN;
-            *write++ = 0;
-        }
-        buffer->data_used = (uint32_t*)write - buffer->data;
-        buffer->status = SCANLINE_OK;
-#ifdef TIMING_MEASURE_PIN
-        gpio_put(TIMING_MEASURE_PIN, 0);
-#endif
-        scanvideo_end_scanline_generation(buffer);
-    }
 }

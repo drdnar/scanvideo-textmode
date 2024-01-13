@@ -31,14 +31,20 @@ extern uint16_t* volatile text_mode_current_palette;
 #endif
 
 /**
- * Custom video mode for 800x480 TFT LCD.
- */
-extern const scanvideo_mode_t tft_mode_480x800_60;
-
-/**
  * Launch this on core 1 to start rendering textual video.
  */
 void text_mode_render_loop(void);
+
+/**
+ * This is the line generator routine for text mode.
+ * @note Call text_mode_setup_interp() on each core that uses this routine.
+ * @param write Write pointer
+ * @param scanline Scanline number from scanvideo_scanline_number(buffer->scanline_id)
+ * @param screen Pointer to text_buffer with page of text to display
+ * @param font Pointer to font to use for rendering
+ * @return Returns modified write pointer, which you can use to compute the correct length for a COMPOSABLE_RAW_RUN
+ */
+uint16_t* text_mode_generate_line(uint16_t* write, unsigned scanline, text_buffer* screen, const text_mode_font* font);
 
 /**
  * Sets up the interpolator required by the fast font code.
@@ -49,5 +55,10 @@ void text_mode_setup_interp(void);
  * Unclaims the interpolator used by the fast font code.
  */
 void text_mode_release_interp(void);
+
+/**
+ * Custom video mode for 800x480 TFT LCD.
+ */
+extern const scanvideo_mode_t tft_mode_480x800_60;
 
 #endif /* SCANVIDEO_TEXT_MODE_H */
