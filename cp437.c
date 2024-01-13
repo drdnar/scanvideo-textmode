@@ -1,15 +1,16 @@
+#if TEXT_MODE_MAX_FONT_WIDTH > 8
 #include "cp437.h"
 
 const CP437_SECTION_ATTRIBUTE struct text_mode_font cp437 = (text_mode_font)
 {
     CP437_FONT_WIDTH, // scan_pixels
     CP437_FONT_HEIGHT, // scan_lines
-    2, // bytes_per_scan
-    28, // bytes_per_glyph
+    sizeof(CP437_DATA_TYPE), // bytes_per_scan
+    sizeof(CP437_DATA_TYPE) * CP437_FONT_HEIGHT, // bytes_per_glyph
     (void* const)&cp437_bitmaps[0][0][0] // data
 };
 
-const CP437_SECTION_ATTRIBUTE unsigned short cp437_bitmaps[CP437_FONTS_COUNT][CP437_FONT_GLYPH_COUNT][CP437_FONT_HEIGHT] = {{
+const CP437_SECTION_ATTRIBUTE CP437_DATA_TYPE cp437_bitmaps[CP437_FONTS_COUNT][CP437_FONT_GLYPH_COUNT][CP437_FONT_HEIGHT] = {{
 { // #0
     0b000000000, 
     0b000000000, 
@@ -3852,3 +3853,4 @@ const CP437_SECTION_ATTRIBUTE unsigned short cp437_bitmaps[CP437_FONTS_COUNT][CP
     0b000000000, 
 }, 
 }};
+#endif /* TEXT_MODE_MAX_FONT_WIDTH > 8 */

@@ -38,6 +38,16 @@ extern const scanvideo_mode_t tft_mode_480x800_60;
 /**
  * Launch this on core 1 to start rendering textual video.
  */
-void text_mode_render_loop();
+void text_mode_render_loop(void);
+
+/**
+ * Sets up the interpolator required by the fast font code.
+ */
+void text_mode_setup_interp(void);
+
+/**
+ * Unclaims the interpolator used by the fast font code.
+ */
+void text_mode_release_interp(void);
 
 #endif /* SCANVIDEO_TEXT_MODE_H */

@@ -22,8 +22,6 @@ typedef struct Coord
 static inline coord coord_add(const coord a, const coord b)
 {
     coord r = { a.x + b.x, a.y + b.y };
-    //r.x = a.x + b.x;
-    //r.y = a.y + b.y;
     return r;
 };
 
@@ -34,8 +32,6 @@ static inline coord coord_add(const coord a, const coord b)
 static inline coord coord_subtract(const coord a, const coord b)
 {
     coord r = { a.x - b.x, a.y - b.y };
-    //r.x = a.x - b.x;
-    //r.y = a.y - b.y;
     return r;
 };
 
@@ -52,6 +48,8 @@ static inline bool coord_equals(const coord a, const coord b)
  */
 static inline bool coord_longer(const coord a, const coord b)
 {
+    // Note: For the purposes of inequality testing,
+    // we can just factor out the square root from the Pythagorean theorem.
     return a.x*a.x + a.y*a.y > b.x*b.x + b.y*b.y;
 }
 

@@ -1,6 +1,14 @@
 #ifndef TEXT_MODE_FONT_H
 #define TEXT_MODE_FONT_H
 
+#if TEXT_MODE_MAX_FONT_WIDTH <= 8
+#define TEXT_MODE_FONT_DATA_TYPE unsigned char
+#elif TEXT_MODE_MAX_FONT_WIDTH <= 16
+#define TEXT_MODE_FONT_DATA_TYPE unsigned short
+#else
+#define TEXT_MODE_FONT_DATA_TYPE unsigned int
+#endif
+
 /**
  * Contains font information used by the text_mode scan line generator routines.
  * The font data supplied shall be formatted as an array of fixed-size glyph bitmaps.
@@ -30,7 +38,7 @@ typedef struct text_mode_font
      */
     const unsigned char bytes_per_glyph;
     /**
-     * Pointer to font data.  (The drawing routines figure out the right data type.)
+     * Pointer to font data.
      */
     const void* const data;
 } text_mode_font;

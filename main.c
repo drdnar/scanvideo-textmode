@@ -26,15 +26,17 @@
 // recompiled even though these settings only affect this file.
 // So these settings just live in this file.
 
-// Implement full 800x480 at 180 MHz instead of 760x480 at 150 MHz.
-#define FULL_RES
+// Enables extra overclocking to 210 MHz when both TEXT_MODE_CORE_1_IRQs and
+// TEXT_MODE_PALETTIZED_COLOR are enabled.
+//#define FULL_RES
 // Use CP437 font instead
+// NOTE: Set TEXT_MODE_MAX_FONT_WIDTH to 15 in CMakeLists.txt
 //#define USE_CP437
 
 // If you turn off FULL_RES and change the screen resolution, you may want to override these
 // because the limits chosen below are calibrated specifically for my 800x480 TFT.
-// #define TEXT_ROWS 40
-// #define TEXT_COLS 100
+//#define TEXT_ROWS 40
+//#define TEXT_COLS 100
 
 // Adjust text buffer size to match screen size and what can be rendered fast enough.
 #ifdef USE_CP437
@@ -46,17 +48,8 @@
         #define TEXT_ROWS ((SCREEN_HEIGHT + CP437_FONT_HEIGHT - 1) / CP437_FONT_HEIGHT)
     #endif
     #ifndef TEXT_COLS
-        #ifdef FULL_RES
-            // 88
-            #define TEXT_COLS ((SCREEN_WIDTH + CP437_FONT_WIDTH - 1) / CP437_FONT_WIDTH)
-        #else /* not FULL_RES */
-            #if !TEXT_MODE_PALETTIZED_COLOR
-                // 88
-                #define TEXT_COLS ((SCREEN_WIDTH + CP437_FONT_WIDTH - 1) / CP437_FONT_WIDTH)
-            #else /* TEXT_MODE_PALETTIZED_COLOR */
-                #define TEXT_COLS 79
-            #endif /* TEXT_MODE_PALETTIZED_COLOR */
-        #endif /* FULL_RES */
+        // 88
+        #define TEXT_COLS ((SCREEN_WIDTH + CP437_FONT_WIDTH - 1) / CP437_FONT_WIDTH)
     #endif
 #else /* not USE_CP437 */
     #ifndef TEXT_ROWS
@@ -69,9 +62,9 @@
             #define TEXT_COLS ((SCREEN_WIDTH + MONO_FONT_WIDTH - 1) / MONO_FONT_WIDTH)
         #else /* not FULL_RES */
             #if !TEXT_MODE_PALETTIZED_COLOR
-                #define TEXT_COLS 96
+                #define TEXT_COLS ((SCREEN_WIDTH + MONO_FONT_WIDTH - 1) / MONO_FONT_WIDTH)
             #else /* TEXT_MODE_PALETTIZED_COLOR */
-                #define TEXT_COLS 85
+                #define TEXT_COLS 91
             #endif /* TEXT_MODE_PALETTIZED_COLOR */
         #endif /* FULL_RES */
     #endif
@@ -212,23 +205,27 @@ int main()
     // you may be able to get away with a less aggressive overclock, or even none at all.
 #ifdef FULL_RES
     #if !TEXT_MODE_PALETTIZED_COLOR
-        set_sys_clock_khz(180000, true);
-    #else
-        #ifndef CORE_1_IRQs
+        #if TEXT_MODE_CORE_1_IRQs
             set_sys_clock_khz(180000, true);
         #else
-            set_sys_clock_khz(210000, true);
+            set_sys_clock_khz(150000, true);
+        #endif
+    #else
+        #if TEXT_MODE_CORE_1_IRQs
+            #ifdef USE_CP437
+                set_sys_clock_khz(180000, true);
+            #else
+                set_sys_clock_khz(210000, true);
+            #endif
+        #else
+            set_sys_clock_khz(180000, true);
         #endif
     #endif
 #else
-    #if !TEXT_MODE_PALETTIZED_COLOR
-        #ifndef CORE_1_IRQs
-            set_sys_clock_khz(150000, true);
-        #else
-            set_sys_clock_khz(180000, true);
-        #endif
-    #else
+    #if TEXT_MODE_CORE_1_IRQs
         set_sys_clock_khz(180000, true);
+    #else
+        set_sys_clock_khz(150000, true);
     #endif
 #endif
     stdio_init_all(); // Enable UART
@@ -255,6 +252,9 @@ int main()
     /// end 800x480 TFT ////////////////////////////////////////////////////////
     text_mode_current_buffer = &main_buffer;
 #ifndef USE_CP437
+#if TEXT_MODE_MAX_FONT_WIDTH < 8
+#error "Cannot use CP437 font because you forgot to set TEXT_MODE_MAX_FONT_WIDTH=14 in CMakeLists.txt."
+#endif
     text_mode_current_font = &mono_font_12_normal;
 #else
     text_mode_current_font = &cp437;
@@ -268,7 +268,6 @@ int main()
     // Display test text
     main_buffer.colors.foreground = BLACK;
     main_buffer.colors.background = BRIGHT_WHITE;
-    const char* title = "The Picture of Dorian Gray";
     text_window title_window;
     text_window_ctor_in_place(&title_window, &main_buffer, (coord){ 0, 0 },
         (coord){ main_buffer.size.x, 2 }
@@ -332,8 +331,8 @@ int main()
     );
 
     // Rainbow effect to prove color works.
-    //text_cell* cell = text_buffer_cell(current_buffer, 0, 0);
-    //for (int i = 0; i < current_buffer->size.x * current_buffer->size.y; i++, cell++) {
+    //text_cell* cell = text_buffer_cell(text_mode_current_buffer, 0, 0);
+    //for (int i = 0; i < text_mode_current_buffer->size.x * text_mode_current_buffer->size.y; i++, cell++) {
     //    //if ((i & 63) != BRIGHT_WHITE)
     //        cell->foreground = i;
     //        cell->background = ~i;

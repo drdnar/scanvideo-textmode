@@ -4,12 +4,12 @@ const MONO_FONT_12_SECTION_ATTRIBUTE struct text_mode_font mono_font_12_normal =
 {
     MONO_FONT_WIDTH, // scan_pixels
     MONO_FONT_HEIGHT, // scan_lines
-    1, // bytes_per_scan
-    12, // bytes_per_glyph
+    sizeof(TEXT_MODE_FONT_DATA_TYPE), // bytes_per_scan
+    sizeof(TEXT_MODE_FONT_DATA_TYPE) * MONO_FONT_HEIGHT, // bytes_per_glyph
     (void* const)&mono_font_12_bitmaps_normal[0][0][0] // data
 };
 
-const MONO_FONT_12_SECTION_ATTRIBUTE unsigned char mono_font_12_bitmaps_normal[MONO_FONTS_COUNT][MONO_FONT_GLYPH_COUNT][MONO_FONT_HEIGHT] = {
+const MONO_FONT_12_SECTION_ATTRIBUTE TEXT_MODE_FONT_DATA_TYPE mono_font_12_bitmaps_normal[MONO_FONTS_COUNT][MONO_FONT_GLYPH_COUNT][MONO_FONT_HEIGHT] = {
 ////////////////////////////////////////////////////////////////////////////////
 /////// FONT 0 REGULAR /////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////

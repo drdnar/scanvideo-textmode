@@ -30,7 +30,15 @@ target_compile_definitions(scanvideotest PRIVATE
 )
 
 target_compile_definitions(scanvideotest PUBLIC
+    # Standard values are 8, 15, 16, and 30.
+    # If <= 8, each line of a font takes one byte; <= 16, two bytes; otherwise, four bytes.
+    # Due to the way the interpolator decodes colors,
+    # each pixel wider than 15 eats into the bits usable for color.
+    # For example, with 19, colors are limited to 12 bits.
+    # This applies even if you're using bit 15 as a transparency bit.
+    TEXT_MODE_MAX_FONT_WIDTH=8
     # If set to 1, text cell colors are 8-bit indexes into an array of 16-bit color values.
+    # This will consume about 10 % more CPU time.
     TEXT_MODE_PALETTIZED_COLOR=0
     # Set to run IRQs on core 1 along side to scan line generation code.
     TEXT_MODE_CORE_1_IRQs=0
@@ -70,6 +78,7 @@ target_link_libraries(scanvideotest
     hardware_divider
     hardware_adc
     hardware_vreg
+    hardware_interp
     pico_stdlib
     pico_time
     pico_unique_id

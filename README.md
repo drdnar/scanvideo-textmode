@@ -1,10 +1,13 @@
 This implements text rendering for the RP2040 `scanvideo` library.
-Thanks to hand-optimized assembly code, this is fast enough for 640×480 60 Hz VGA at a modest overclock of 150 MHz.
+Thanks to hand-optimized assembly code and the RP2040's interpolators,
+this is fast enough for 800×480 60 Hz WVGA at a modest overclock of 150 MHz.
+It can probably handle 640×480 60 Hz VGA at 120 MHz, but I don't plan on testing that.
 
 ## Usage
 
 Adjust the settings in `CMakeLists.txt` to match your project's hardware.
 Pay particular attention to pin mappings, `TEXT_VIDEO_MODE`, and `SCREEN_` size.
+
 Due to the small size of the demo, `set(PICO_NO_FLASH 1)` is selected, which preloads all code and data into RAM.
 In a larger, more functional project, you may need to disable this.
 In `main.c`, you can also override the text buffer size and select an alternative font named CP437,
@@ -35,9 +38,19 @@ You can switch between different pages of text by simply changing the `text_mode
 
 #### Font
 
-A fixed-size font of any height and between one and sixteen pixels wide can be used.
+A fixed-size font of any height and between one and fifteen pixels wide can be used.
+(But see below for discussion of support for fonts up to 30 pixels wide.)
 Because you can have 16-bit character codes, you can have multiple font sets (e.g. bold and non-bold),
 and also have extra dingbats and pseudographical characters.
+CJK writing is also readily supported, thanks to support for wider characters and 16-bit character codes.
+
+`TEXT_MODE_MAX_FONT_WIDTH` in `CMakeLists.txt` controls font data type size.
+If `TEXT_MODE_MAX_FONT_WIDTH` is <= 8, then each line of every font's bitmap is a single byte to save memory.
+If `TEXT_MODE_MAX_FONT_WIDTH` is <= 16, then each line will be two bytes.
+Otherwise, each line is four bytes.
+Due to the way the interpolator is used for bitmap decoding,
+**`TEXT_MODE_MAX_FONT_WIDTH` should be less than 15,** but can be any value up to 30.
+See the section on interpolator usage for more details.
 
 Note that modern C now supports binary literals directly with the `0b` prefix.
 This makes declaring bitmaps a lot easier,
@@ -45,12 +58,6 @@ although a GUI font editor is still nice if you write a suitable converter.
 
 Although the provided fonts are declared `const`, your fonts don't need to be.
 Using non-`const` fonts would allow you to generate additional glyphs on-demand, allowing for more flexibility.
-
-CJK writing is also readily supported, thanks to support for wider characters and 16-bit character codes.
-The assembly code can be readily adapted to characters up to 32 pixels wide if desired.
-
-To save memory, each line of a font can be either one or two bytes.
-If you want, you can have a font eight-or-fewer pixels wide with two-byte-size lines.
 
 At the start of every scan line,
 a pointer to the currently active `text_mode_font` is cached and used to render the line.
@@ -72,20 +79,41 @@ You can also alter the palette by overwriting palette entires directly.
 While changing the palette pointer only takes effect at the start of the next line,
 changing palette entries will take effect while the line is still being rendered.
 
+## Resource Usage
+
+#### Interpolator
+
+This uses `INTERP1` to accelerate decoding and colorizing font bitmap data.
+`INTERP1` must be configured on every core that runs the scanline generator routine.
+Note that each core has independent interpolators, and they can only be configured with code running from that core.
+Therefore, if you divide scanline generation between cores, `INTERP1` must be configured twice, once from each core.
+
+Due to the way the interpolator is used for bitmap decoding,
+**`TEXT_MODE_MAX_FONT_WIDTH` should be less than 15,** but can be any value up to 29.
+If it is greater than 15, some bits in the color values must be sacrificed.
+This may present an issue if you want to use `scanvideo`'s multiple planes feature.
+For example, if `TEXT_MODE_MAX_FONT_WIDTH` is 16, then color values cannot be a full 16 bits,
+but only 15 bits (the high bit must be clear or the colors may not decode correctly).
+If `TEXT_MODE_MAX_FONT_WIDTH` is 19, then only 12-bit colors may be used.
+(Thirty would leave only one bit for color, and I'm not sure if that's useful, but you can do it.)
+
 #### Performance
 
-Unfortunately, this isn't quite fast enough to achieve 640×480 VGA at 60 Hz with a CPU clock speed of 125 MHz.
-However, it works fine with a modest overclock of 150 MHz.
+This appears fast enough to achieve 640×480 VGA at 60 Hz without overclocking
+if you don't use `TEXT_MODE_PALETTIZED_COLOR` or `TEXT_MODE_CORE_1_IRQs`.
+For my 800×480 TFT, 120 MHz causes weird graphical glitches for some reason, but
+it works fine with a modest overclock of 150 MHz.
 
-Using hand-optimized assembly, this achieves about 6-8 cycles per output pixel depending on options.
+Using both an interpolator and hand-optimized assembly,
+this achieves about 5½-8 cycles per output pixel depending on options.
 Wider characters reduce overhead and give better performance.
 Enabling the palettized mode costs about ½–1 extra cycle per pixel depending on how wide the characters are.
 
 For example, with an 8-pixel-wide font and palettized color turned off,
-each pixel will take an average of about 7 cycles.
-At 150 MHz, each line will take 1/(150 MHz) × 7 cycles per pixel × 640 pixels = 30 μs.
+each pixel will take an average of about 6⅝ cycles.
+At 150 MHz, each line will take 1/(150 MHz) × 6⅝ cycles per pixel × 640 pixels ≈ 29 μs.
 
-#### RAM Usage
+#### RAM
 
 Your font should be located in RAM, because otherwise cache misses might cause a huge performance penalty.
 
@@ -96,6 +124,7 @@ which is also where core 1's stack goes.
 Placing the rendering code in scratch Y ensures that there can never be contention for an instruction fetch.
 Since this eats into the stack space available for core 1,
 you might want to be a little more cautious with what other code you run on core 1.
+Also, for each pixel smaller `TEXT_MODE_MAX_FONT_WIDTH` is, four bytes in scratch Y are saved.
 
 ## Demo
 

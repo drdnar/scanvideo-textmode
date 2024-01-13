@@ -25,7 +25,7 @@
 /**
  * Raw glyph bitmap data array.
  */
-extern const MONO_FONT_12_SECTION_ATTRIBUTE unsigned char mono_font_12_bitmaps_normal[MONO_FONTS_COUNT][MONO_FONT_GLYPH_COUNT][MONO_FONT_HEIGHT];
+extern const MONO_FONT_12_SECTION_ATTRIBUTE TEXT_MODE_FONT_DATA_TYPE mono_font_12_bitmaps_normal[MONO_FONTS_COUNT][MONO_FONT_GLYPH_COUNT][MONO_FONT_HEIGHT];
 /**
  * 12-pixel-high monospaced font descriptor for text_mode rendering routine
  */
