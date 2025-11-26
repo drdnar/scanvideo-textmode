@@ -1,6 +1,6 @@
 #ifndef MONO_FONTS_12_H
 #define MONO_FONTS_12_H
-#include "pico/platform.h"
+#include "pico.h"
 #include "text_mode_font.h"
 
 #define MONO_FONT_HEIGHT 12

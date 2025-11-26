@@ -5,6 +5,7 @@
 #include "pico/scanvideo/scanvideo_base.h"
 #include "pico/scanvideo/composable_scanline.h"
 #include "pico/multicore.h"
+#include "hardware/vreg.h"
 #include "hardware/clocks.h"
 #include "hardware/gpio.h"
 #include "hardware/pwm.h"
@@ -200,32 +201,29 @@ text_buffer main_buffer = STATIC_TEXT_BUFFER(TEXT_COLS, TEXT_ROWS, BRIGHT_WHITE,
 
 int main()
 {
+    vreg_set_voltage(VREG_VOLTAGE_1_15);
     // Adjust CPU speed to be as fast as needed for selected options.
     // These are calibrated for an 800x480 60 Hz TFT LCD; at lower resolutions (e.g. 640x480 VGA),
     // you may be able to get away with a less aggressive overclock, or even none at all.
 #ifdef FULL_RES
     #if !TEXT_MODE_PALETTIZED_COLOR
-        #if TEXT_MODE_CORE_1_IRQs
-            set_sys_clock_khz(180000, true);
-        #else
-            set_sys_clock_khz(150000, true);
-        #endif
+        set_sys_clock_khz(180000, true);
     #else
         #if TEXT_MODE_CORE_1_IRQs
-            #ifdef USE_CP437
-                set_sys_clock_khz(180000, true);
-            #else
-                set_sys_clock_khz(210000, true);
-            #endif
+            set_sys_clock_khz(210000, true);
         #else
             set_sys_clock_khz(180000, true);
         #endif
     #endif
 #else
-    #if TEXT_MODE_CORE_1_IRQs
+    #if !TEXT_MODE_PALETTIZED_COLOR
         set_sys_clock_khz(180000, true);
     #else
-        set_sys_clock_khz(150000, true);
+        #if TEXT_MODE_CORE_1_IRQs
+            set_sys_clock_khz(210000, true);
+        #else
+            set_sys_clock_khz(180000, true);
+        #endif
     #endif
 #endif
     stdio_init_all(); // Enable UART

@@ -1,7 +1,7 @@
 #ifndef CP437_FONT_H
 #define CP437_FONT_H
 #if TEXT_MODE_MAX_FONT_WIDTH > 8
-#include "pico/platform.h"
+#include "pico.h"
 #include "text_mode_font.h"
 
 #if TEXT_MODE_MAX_FONT_WIDTH <= 16

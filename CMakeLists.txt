@@ -1,3 +1,19 @@
+# == DO NOT EDIT THE FOLLOWING LINES for the Raspberry Pi Pico VS Code Extension to work ==
+if(WIN32)
+    set(USERHOME $ENV{USERPROFILE})
+else()
+    set(USERHOME $ENV{HOME})
+endif()
+set(sdkVersion 2.2.0)
+set(toolchainVersion 14_2_Rel1)
+set(picotoolVersion 2.2.0-a4)
+set(picoVscode ${USERHOME}/.pico-sdk/cmake/pico-vscode.cmake)
+if (EXISTS ${picoVscode})
+    include(${picoVscode})
+endif()
+# ====================================================================================
+set(PICO_BOARD pico CACHE STRING "Board type")
+
 cmake_minimum_required(VERSION 3.13)
 
 include(pico_sdk_import.cmake)
@@ -52,10 +68,10 @@ target_compile_definitions(scanvideotest PUBLIC
     PICO_SCANVIDEO_MAX_SCANLINE_BUFFER_WORDS=1024
     PICO_SCANVIDEO_SCANLINE_BUFFER_COUNT=4
     PICO_SCANVIDEO_COLOR_PIN_BASE=0
-    PICO_SCANVIDEO_COLOR_PIN_COUNT=12
-    PICO_SCANVIDEO_SYNC_PIN_BASE=12
-    PICO_SCANVIDEO_ENABLE_CLOCK_PIN=1
-    PICO_SCANVIDEO_ENABLE_DEN_PIN=1
+    PICO_SCANVIDEO_COLOR_PIN_COUNT=6
+    PICO_SCANVIDEO_SYNC_PIN_BASE=6
+    PICO_SCANVIDEO_ENABLE_CLOCK_PIN=9
+    PICO_SCANVIDEO_ENABLE_DEN_PIN=8
     PICO_SCANVIDEO_PIXEL_RSHIFT=0
     PICO_SCANVIDEO_PIXEL_RCOUNT=2
     PICO_SCANVIDEO_PIXEL_GSHIFT=2

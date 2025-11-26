@@ -66,20 +66,20 @@ void CORE_1_FUNC(text_mode_render_loop)()
         write = text_mode_generate_line(write, scanvideo_scanline_number(buffer->scanline_id), screen, font);
         uint16_t* length = (uint16_t*)buffer->data + 1;
         length[0] = length[1];
-        size_t count = write - length - 1;
+        size_t count = write - length - 1 - 3;
         length[1] = count;
         if (count & 1) {
-            *write++ = COMPOSABLE_EOL_ALIGN;
-        } else {
             *write++ = COMPOSABLE_EOL_SKIP_ALIGN;
             *write++ = 0;
+        } else {
+            *write++ = COMPOSABLE_EOL_ALIGN;
         }
         buffer->data_used = (uint32_t*)write - buffer->data;
         buffer->status = SCANLINE_OK;
+        scanvideo_end_scanline_generation(buffer);
 #ifdef TIMING_MEASURE_PIN
         gpio_put(TIMING_MEASURE_PIN, 0);
 #endif
-        scanvideo_end_scanline_generation(buffer);
     }
 }
 
