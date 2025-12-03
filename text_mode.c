@@ -156,7 +156,7 @@ uint16_t* CORE_1_FUNC(text_mode_generate_line)(uint16_t* write, unsigned scanlin
         "    ldrh    r7, [%[read], #cellfg]\n"
 #else
         "    ldrb    r7, [%[read], #cellfg]\n"
-        "    lsl     r7, r7, #1\n"
+        "    lsls    r7, r7, #1\n"
         "    ldrh    r7, [%[palette], r7]\n"
 #endif
         "    add     r7, %[embiggener]\n"
@@ -165,7 +165,7 @@ uint16_t* CORE_1_FUNC(text_mode_generate_line)(uint16_t* write, unsigned scanlin
         "    ldrh    r7, [%[read], #cellbg]\n"
 #else
         "    ldrb    r7, [%[read], #cellbg]\n"
-        "    lsl     r7, r7, #1\n"
+        "    lsls    r7, r7, #1\n"
         "    ldrh    r7, [%[palette], r7]\n"
 #endif
         "    str     r7, [%[interp], #base0]\n"
@@ -174,7 +174,7 @@ uint16_t* CORE_1_FUNC(text_mode_generate_line)(uint16_t* write, unsigned scanlin
         "    add     %[read], %[read], #cellsize\n"
         "    // RP2040's CPU cores have the single-cycle multiplier option so shifting isn't any faster\n"
         "    // and is really only useful if you need to save a register.\n"
-        "    mul     r7, %[glyphsize], r7\n"
+        "    muls    r7, %[glyphsize], r7\n"
 #if TEXT_MODE_MAX_FONT_WIDTH <= 8
         "    ldrb    r7, [%[font], r7]\n"
 #elif TEXT_MODE_MAX_FONT_WIDTH <= 16
@@ -182,7 +182,7 @@ uint16_t* CORE_1_FUNC(text_mode_generate_line)(uint16_t* write, unsigned scanlin
 #else
         "    ldr     r7, [%[font], r7]\n"
 #endif
-        "    lsl     r7, r7, #shiftamount\n"
+        "    lsls    r7, r7, #shiftamount\n"
         "    str     r7, [%[interp], #accum0]\n"
         "    str     r7, [%[interp], #accum1]\n"
         "// Unrolled loop\n"
@@ -283,14 +283,14 @@ uint16_t* CORE_1_FUNC(text_mode_generate_line)(uint16_t* write, unsigned scanlin
 #endif
         handlebit(0)
         "    add     %[write], %[writeinc]\n"
-        "    sub     %[cols], #1\n"
+        "    subs    %[cols], #1\n"
         "    beq     done%=\n"
         "// Fetch colors\n"
 #if !TEXT_MODE_PALETTIZED_COLOR
         "    ldrh    r7, [%[read], #cellfg]\n"
 #else
         "    ldrb    r7, [%[read], #cellfg]\n"
-        "    lsl     r7, r7, #1\n"
+        "    lsls    r7, r7, #1\n"
         "    ldrh    r7, [%[palette], r7]\n"
 #endif
         "    add     r7, %[embiggener]\n"
@@ -299,14 +299,14 @@ uint16_t* CORE_1_FUNC(text_mode_generate_line)(uint16_t* write, unsigned scanlin
         "    ldrh    r7, [%[read], #cellbg]\n"
 #else
         "    ldrb    r7, [%[read], #cellbg]\n"
-        "    lsl     r7, r7, #1\n"
+        "    lsls    r7, r7, #1\n"
         "    ldrh    r7, [%[palette], r7]\n"
 #endif
         "    str     r7, [%[interp], #base0]\n"
         "// Fetch character\n"
         "    ldrh    r7, [%[read], #cellchar]\n"
-        "    add     %[read], %[read], #cellsize\n"
-        "    mul     r7, %[glyphsize], r7\n"
+        "    adds    %[read], %[read], #cellsize\n"
+        "    muls    r7, %[glyphsize], r7\n"
 #if TEXT_MODE_MAX_FONT_WIDTH <= 8
         "    ldrb    r7, [%[font], r7]\n"
 #elif TEXT_MODE_MAX_FONT_WIDTH <= 16
@@ -314,7 +314,7 @@ uint16_t* CORE_1_FUNC(text_mode_generate_line)(uint16_t* write, unsigned scanlin
 #else
         "    ldr     r7, [%[font], r7]\n"
 #endif
-        "    lsl     r7, r7, #shiftamount\n"
+        "    lsls    r7, r7, #shiftamount\n"
         "    str     r7, [%[interp], #accum0]\n"
         "    str     r7, [%[interp], #accum1]\n"
         "    bx      %[loopstart]\n"
